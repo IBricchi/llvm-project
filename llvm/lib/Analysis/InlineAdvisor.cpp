@@ -605,15 +605,12 @@ InlineAdvisor::getMandatoryKind(CallBase &CB, FunctionAnalysisManager &FAM,
   return MandatoryInliningKind::NotMandatory;
 }
 
-// static uint64_t pairing_function(uint64_t a, uint64_t b) {
-//   return (a + b) * (a + b + 1) / 2 + b;
-// }
-
 /// Flag to path of dynamic libarary
-static cl::opt<bool>
-    IBDlPath("ib-dl-path", cl::init(false),
-                          cl::NotHidden,
-                          cl::desc("Debuging tool used only temporarily to speedup build times."));
+static cl::opt<std::string> DLInlineAdivisorPath(
+    "dl-inline-advisor-path",
+    cl::desc("Path to a dynamic library that can be used instead of the default inline advisor."),
+    cl::value_desc("dynamic library path."));
+
 #include <dlfcn.h>
 
 std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
@@ -628,14 +625,14 @@ std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
     out = getMandatoryAdvice(CB, Advice);
   }
 
-  if(IBDlPath)
+  if(!DLInlineAdivisorPath.empty())
   {
-    void* handle = dlopen("/home/ibricchi/llvm/bin/my-inline-info.so", RTLD_LAZY);
+    void* handle = dlopen(DLInlineAdivisorPath.c_str(), RTLD_LAZY);
     
     void (*my_inline_info)(void*, void*, void*);
-    my_inline_info = (void (*)(void*, void*, void*)) dlsym(handle, "my_inline_info");
+    my_inline_info = (void (*)(void*, void*, void*)) dlsym(handle, "dynamic_getAdvice");
     my_inline_info(&CB, &MandatoryOnly, &out);
-    
+
     dlclose(handle);
   }
 
