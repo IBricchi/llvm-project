@@ -1,0 +1,1 @@
+g++ -fPIC -shared my-inline-info.cpp -o my-inline-info.so

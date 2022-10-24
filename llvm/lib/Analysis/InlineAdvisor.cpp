@@ -605,14 +605,41 @@ InlineAdvisor::getMandatoryKind(CallBase &CB, FunctionAnalysisManager &FAM,
   return MandatoryInliningKind::NotMandatory;
 }
 
+// static uint64_t pairing_function(uint64_t a, uint64_t b) {
+//   return (a + b) * (a + b + 1) / 2 + b;
+// }
+
+/// Flag to path of dynamic libarary
+static cl::opt<bool>
+    IBDlPath("ib-dl-path", cl::init(false),
+                          cl::NotHidden,
+                          cl::desc("Debuging tool used only temporarily to speedup build times."));
+#include <dlfcn.h>
+
 std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
                                                        bool MandatoryOnly) {
+  std::unique_ptr<InlineAdvice> out;
   if (!MandatoryOnly)
-    return getAdviceImpl(CB);
-  bool Advice = CB.getCaller() != CB.getCalledFunction() &&
-                MandatoryInliningKind::Always ==
-                    getMandatoryKind(CB, FAM, getCallerORE(CB));
-  return getMandatoryAdvice(CB, Advice);
+    out = getAdviceImpl(CB);
+  else{
+    bool Advice = CB.getCaller() != CB.getCalledFunction() &&
+                  MandatoryInliningKind::Always ==
+                      getMandatoryKind(CB, FAM, getCallerORE(CB));
+    out = getMandatoryAdvice(CB, Advice);
+  }
+
+  if(IBDlPath)
+  {
+    void* handle = dlopen("/home/ibricchi/llvm/bin/my-inline-info.so", RTLD_LAZY);
+    
+    void (*my_inline_info)(void*, void*, void*);
+    my_inline_info = (void (*)(void*, void*, void*)) dlsym(handle, "my_inline_info");
+    my_inline_info(&CB, &MandatoryOnly, &out);
+    
+    dlclose(handle);
+  }
+
+  return out;
 }
 
 OptimizationRemarkEmitter &InlineAdvisor::getCallerORE(CallBase &CB) {
