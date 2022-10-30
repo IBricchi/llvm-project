@@ -193,7 +193,8 @@ public:
     OS << "Unimplemented InlineAdvisor print\n";
   }
 
-  /// NOTE pass name is annotated only when inline advisor constructor provides InlineContext.
+  /// NOTE pass name is annotated only when inline advisor constructor provides
+  /// InlineContext.
   const char *getAnnotatedInlinePassName() const {
     return AnnotatedInlinePassName.c_str();
   }
@@ -219,8 +220,10 @@ protected:
 
   OptimizationRemarkEmitter &getCallerORE(CallBase &CB);
 
-  void* dl_handle;
-  typedef void (*dyn_advice_fn)(void *, void *, void *, void *, void *);
+  void *dl_handle;
+  typedef void (*dyn_advice_fn)(InlineAdvisor *, OptimizationRemarkEmitter *,
+                                CallBase *, bool *,
+                                std::unique_ptr<InlineAdvice> *, std::string *);
   dyn_advice_fn dyn_advisor;
 
 private:

@@ -74,6 +74,13 @@ static cl::opt<std::string>
                                   "instead of the default inline advisor."),
                          cl::value_desc("dynamic library path."));
 
+static cl::opt<std::string> DLInlineAdivisorCTX(
+    "dl-inline-advisor-ctx",
+    cl::init(""),
+    cl::desc(
+        "String passed to dynamic inline advisor to modify it's behaviour."),
+    cl::value_desc("dynamic library context."));
+
 namespace {
 using namespace llvm::ore;
 class MandatoryInlineAdvice : public InlineAdvice {
@@ -635,7 +642,7 @@ std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
   }
 
   if (dl_handle != nullptr)
-    dyn_advisor(this, &getCallerORE(CB), &CB, &MandatoryOnly, &out);
+    dyn_advisor(this, &getCallerORE(CB), &CB, &MandatoryOnly, &out, &DLInlineAdivisorCTX.getValue());
 
   return out;
 }
