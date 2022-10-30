@@ -606,10 +606,11 @@ InlineAdvisor::getMandatoryKind(CallBase &CB, FunctionAnalysisManager &FAM,
 }
 
 /// Flag to path of dynamic libarary
-static cl::opt<std::string> DLInlineAdivisorPath(
-    "dl-inline-advisor-path",
-    cl::desc("Path to a dynamic library that can be used instead of the default inline advisor."),
-    cl::value_desc("dynamic library path."));
+static cl::opt<std::string>
+    DLInlineAdivisorPath("dl-inline-advisor-path",
+                         cl::desc("Path to a dynamic library that can be used "
+                                  "instead of the default inline advisor."),
+                         cl::value_desc("dynamic library path."));
 
 #include <dlfcn.h>
 
@@ -618,20 +619,22 @@ std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
   std::unique_ptr<InlineAdvice> out;
   if (!MandatoryOnly)
     out = getAdviceImpl(CB);
-  else{
+  else {
     bool Advice = CB.getCaller() != CB.getCalledFunction() &&
                   MandatoryInliningKind::Always ==
                       getMandatoryKind(CB, FAM, getCallerORE(CB));
     out = getMandatoryAdvice(CB, Advice);
   }
 
-  if(!DLInlineAdivisorPath.empty())
-  {
-    void* handle = dlopen(DLInlineAdivisorPath.c_str(), RTLD_LAZY);
-    
-    void (*my_inline_info)(void*, void*, void*);
-    my_inline_info = (void (*)(void*, void*, void*)) dlsym(handle, "dynamic_getAdvice");
-    my_inline_info(&CB, &MandatoryOnly, &out);
+  if (!DLInlineAdivisorPath.empty()) {
+    void *handle = dlopen(DLInlineAdivisorPath.c_str(), RTLD_LAZY);
+
+    typedef void (*dyn_advice_fn)(void *, void *, void *, void *, void *);
+
+    dyn_advice_fn my_inline_info =
+        (dyn_advice_fn)dlsym(handle, "dynamic_getAdvice");
+
+    my_inline_info(this, &getCallerORE(CB), &CB, &MandatoryOnly, &out);
 
     dlclose(handle);
   }

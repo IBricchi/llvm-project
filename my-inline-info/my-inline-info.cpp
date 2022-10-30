@@ -16,24 +16,80 @@
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 
-void getAdvice(CallBase &CB, bool MandatoryOnly,
+void getAdvice(InlineAdvisor &advisor, OptimizationRemarkEmitter &ORE,
+               CallBase &CB, bool MandatoryOnly,
                std::unique_ptr<InlineAdvice> &defaultAdvice);
 
-void wrapper_getAdvice(CallBase *CB, bool *MandatoryOnly,
+void wrapper_getAdvice(InlineAdvisor *advisor, OptimizationRemarkEmitter *ORE,
+                       CallBase *CB, bool *MandatoryOnly,
                        std::unique_ptr<InlineAdvice> *defaultAdvice) {
-  getAdvice(*CB, *MandatoryOnly, *defaultAdvice);
+  getAdvice(*advisor, *ORE, *CB, *MandatoryOnly, *defaultAdvice);
 }
 
-extern "C" void dynamic_getAdvice(void *CB, void *MandatoryOnly,
-                                  void *defaultAdvice) {
-  wrapper_getAdvice((CallBase*) CB, (bool*) MandatoryOnly, (std::unique_ptr<InlineAdvice>*) defaultAdvice);
+extern "C" void dynamic_getAdvice(void *advisor, void *ORE, void *CB,
+                                  void *MandatoryOnly, void *defaultAdvice) {
+  wrapper_getAdvice((InlineAdvisor *)advisor, (OptimizationRemarkEmitter *)ORE,
+                    (CallBase *)CB, (bool *)MandatoryOnly,
+                    (std::unique_ptr<InlineAdvice> *)defaultAdvice);
 }
 
 static uint64_t pairing_function(uint64_t a, uint64_t b) {
   return (a + b) * (a + b + 1) / 2 + b;
 }
 
-void getAdvice(CallBase &CB, bool MandatoryOnly,
-               std::unique_ptr<InlineAdvice> &defaultAdvice){
-    __builtin_printf("Hello World\n");
-};
+#include <iostream>
+#include <sstream>
+
+#define print(x) std::cout << __LINE__ << ": " << #x << " = " << x << std::endl
+
+std::string getLocString(DebugLoc loc, bool show_inlining) {
+  // auto *Scope = cast<DIScope>(loc.getScope());
+  std::string OS{};
+  // DILocation *dloc = loc.get();
+  // migrate this to llvm
+  if (loc.get() == nullptr) {
+    exit(1);
+  }
+  // end migrate
+  OS += loc->getFilename();
+  OS += ":";
+  OS += std::to_string(loc.getLine());
+  if (loc.getCol() != 0) {
+    OS += ":";
+    OS += std::to_string(loc.getCol());
+  }
+
+  if (show_inlining) {
+    if (DebugLoc InlinedAtDL = loc->getInlinedAt()) {
+      OS += " @[ ";
+      OS += getLocString(InlinedAtDL, true);
+      OS += " ]";
+    }
+  }
+
+  return OS;
+}
+
+static std::vector<std::string> seen_inline_locations;
+
+void getAdvice(InlineAdvisor &advisor, OptimizationRemarkEmitter &ORE,
+               CallBase &CB, bool MandatoryOnly,
+               std::unique_ptr<InlineAdvice> &defaultAdvice) {
+  StringRef Callee = CB.getCalledFunction()->getName();
+
+  std::string CallLocation{};
+
+  DebugLoc loc = defaultAdvice->getOriginalCallSiteDebugLoc();
+  seen_inline_locations.push_back(getLocString(loc, false));
+  CallLocation = getLocString(loc, true);
+
+  // change any decision to a false decision
+  defaultAdvice->recordUnattemptedInlining();
+  defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, false);
+
+  // print decision
+  std::cout << Callee.str() << " @ " << CallLocation << " : "
+            << (defaultAdvice->isInliningRecommended() ? "inline" : "no inline")
+            << std::endl;
+
+}
