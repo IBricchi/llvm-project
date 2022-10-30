@@ -26,6 +26,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <dlfcn.h>
+
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 #ifdef LLVM_HAVE_TF_AOT_INLINERSIZEMODEL
@@ -64,6 +66,13 @@ static cl::opt<bool>
 namespace llvm {
 extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 }
+
+/// Flag to path of dynamic libarary
+static cl::opt<std::string>
+    DLInlineAdivisorPath("dl-inline-advisor-path",
+                         cl::desc("Path to a dynamic library that can be used "
+                                  "instead of the default inline advisor."),
+                         cl::value_desc("dynamic library path."));
 
 namespace {
 using namespace llvm::ore;
@@ -524,6 +533,12 @@ InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
         std::make_unique<ImportedFunctionsInliningStatistics>();
     ImportedFunctionsStats->setModuleInfo(M);
   }
+  if (!DLInlineAdivisorPath.empty()) {
+    dl_handle = dlopen(DLInlineAdivisorPath.c_str(), RTLD_LAZY);
+    dyn_advisor = (dyn_advice_fn)dlsym(dl_handle, "dynamic_getAdvice");
+  } else {
+    dl_handle = nullptr;
+  }
 }
 
 InlineAdvisor::~InlineAdvisor() {
@@ -532,6 +547,8 @@ InlineAdvisor::~InlineAdvisor() {
     ImportedFunctionsStats->dump(InlinerFunctionImportStats ==
                                  InlinerFunctionImportStatsOpts::Verbose);
   }
+  if (dl_handle != nullptr)
+    dlclose(dl_handle);
 }
 
 std::unique_ptr<InlineAdvice> InlineAdvisor::getMandatoryAdvice(CallBase &CB,
@@ -605,15 +622,6 @@ InlineAdvisor::getMandatoryKind(CallBase &CB, FunctionAnalysisManager &FAM,
   return MandatoryInliningKind::NotMandatory;
 }
 
-/// Flag to path of dynamic libarary
-static cl::opt<std::string>
-    DLInlineAdivisorPath("dl-inline-advisor-path",
-                         cl::desc("Path to a dynamic library that can be used "
-                                  "instead of the default inline advisor."),
-                         cl::value_desc("dynamic library path."));
-
-#include <dlfcn.h>
-
 std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
                                                        bool MandatoryOnly) {
   std::unique_ptr<InlineAdvice> out;
@@ -626,18 +634,8 @@ std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
     out = getMandatoryAdvice(CB, Advice);
   }
 
-  if (!DLInlineAdivisorPath.empty()) {
-    void *handle = dlopen(DLInlineAdivisorPath.c_str(), RTLD_LAZY);
-
-    typedef void (*dyn_advice_fn)(void *, void *, void *, void *, void *);
-
-    dyn_advice_fn my_inline_info =
-        (dyn_advice_fn)dlsym(handle, "dynamic_getAdvice");
-
-    my_inline_info(this, &getCallerORE(CB), &CB, &MandatoryOnly, &out);
-
-    dlclose(handle);
-  }
+  if (dl_handle != nullptr)
+    dyn_advisor(this, &getCallerORE(CB), &CB, &MandatoryOnly, &out);
 
   return out;
 }

@@ -219,6 +219,10 @@ protected:
 
   OptimizationRemarkEmitter &getCallerORE(CallBase &CB);
 
+  void* dl_handle;
+  typedef void (*dyn_advice_fn)(void *, void *, void *, void *, void *);
+  dyn_advice_fn dyn_advisor;
+
 private:
   friend class InlineAdvice;
 };

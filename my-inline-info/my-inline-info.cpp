@@ -13,6 +13,9 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <iostream>
+#include <sstream>
+
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 
@@ -36,9 +39,6 @@ extern "C" void dynamic_getAdvice(void *advisor, void *ORE, void *CB,
 static uint64_t pairing_function(uint64_t a, uint64_t b) {
   return (a + b) * (a + b + 1) / 2 + b;
 }
-
-#include <iostream>
-#include <sstream>
 
 #define print(x) std::cout << __LINE__ << ": " << #x << " = " << x << std::endl
 
@@ -92,4 +92,16 @@ void getAdvice(InlineAdvisor &advisor, OptimizationRemarkEmitter &ORE,
             << (defaultAdvice->isInliningRecommended() ? "inline" : "no inline")
             << std::endl;
 
+}
+
+struct LifetimeDetector{
+  LifetimeDetector();
+  ~LifetimeDetector();
+} lifetime_detector;
+
+LifetimeDetector::LifetimeDetector() {  
+  std::cout << "handle start of pass" << std::endl;
+}
+LifetimeDetector::~LifetimeDetector() {
+  std::cout << "handle end of pass" << std::endl;
 }
