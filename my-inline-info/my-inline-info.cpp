@@ -30,6 +30,8 @@ void parse_advice_file(std::string &filename);
 static enum {
   NONE,
   DEFAULT,
+  FALSE,
+  TRUE,
   OVERRIDE,
 } advice_mode = NONE;
 
@@ -104,20 +106,31 @@ std::string getLocString(DebugLoc loc, bool show_inlining) {
   return OS;
 }
 
+std::string getFnString(Function *F) {
+  // this needs to be more complete
+  return F->getName().str();
+}
+
 // main function
 void getAdvice(InlineAdvisor &advisor, OptimizationRemarkEmitter &ORE,
                CallBase &CB, bool MandatoryOnly,
                std::unique_ptr<InlineAdvice> &defaultAdvice, std::string &ctx) {
 
   if (advice_mode == NONE) {
-    advice_mode = ctx.empty() ? DEFAULT : OVERRIDE;
-    if (advice_mode == OVERRIDE) {
-      std::cout << "Override mode" << std::endl;
+    if (ctx == "false") {
+      advice_mode = FALSE;
+    } else if (ctx == "true") {
+      advice_mode = TRUE;
+    } else if (!ctx.empty()) {
+      advice_mode = OVERRIDE;
       parse_advice_file(ctx);
+    } else {
+      advice_mode = DEFAULT;
     }
   }
 
-  StringRef Callee = CB.getCalledFunction()->getName();
+  std::string callee = getFnString(CB.getCalledFunction());
+  std::string caller = getFnString(CB.getCaller());
 
   std::string CallLocation{};
 
@@ -126,16 +139,26 @@ void getAdvice(InlineAdvisor &advisor, OptimizationRemarkEmitter &ORE,
   CallLocation = getLocString(loc, true);
 
   // change any decision to a false decision
-  if (advice_mode == OVERRIDE) {
-    if (advice_map.find(CallLocation) != advice_map.end()) {
+  switch(advice_mode) {
+    case FALSE:
       defaultAdvice->recordUnattemptedInlining();
-      defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, advice_map[CallLocation]);
-    }
+      defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, false);
+      break;
+    case TRUE:
+      defaultAdvice->recordUnattemptedInlining();
+      defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, true);
+      break;
+    case OVERRIDE:
+      if (advice_map.find(CallLocation) != advice_map.end()) {
+        defaultAdvice->recordUnattemptedInlining();
+        defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, advice_map[CallLocation]);
+      }
+      break;
   }
 
   // print decision
   std::stringstream ss{};
-  ss << Callee.str() << " @ " << CallLocation << " : "
+  ss << caller << "->" << callee << " @ " << CallLocation << " : "
      << (defaultAdvice->isInliningRecommended() ? "inline" : "no-inline");
   decisions_taken.push_back(ss.str());
 }
