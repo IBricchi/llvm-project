@@ -68,15 +68,35 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 }
 
 /// Flag to path of dynamic libarary
-static cl::opt<std::string>
-    DLInlineAdivisorPath("dl-inline-advisor-path",
-                         cl::desc("Path to a dynamic library that can be used "
-                                  "instead of the default inline advisor."),
-                         cl::value_desc("dynamic library path."));
+struct DLInlineAdvisorInfo {
+  typedef std::unique_ptr<InlineAdvisor> (*DLAdivsorFactory_t)(
+      Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
+      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC);
+
+  std::string Path;
+
+  void *Handle;
+  DLAdivsorFactory_t Factory;
+
+  DLInlineAdvisorInfo() : Path{}, Handle(nullptr), Factory(nullptr) {}
+  DLInlineAdvisorInfo(const std::string &Path) : Path(Path) {
+    Handle = dlopen(Path.c_str(), RTLD_LAZY);
+    Factory = (DLAdivsorFactory_t)dlsym(Handle, "DLAdivsorFactory");
+  }
+  ~DLInlineAdvisorInfo() {
+    if (Handle)
+      dlclose(Handle);
+  }
+};
+
+static cl::opt<DLInlineAdvisorInfo, false, cl::parser<std::string>>
+    DLInlineAdivisor("dl-inline-advisor-path",
+                     cl::desc("Path to a dynamic library that can be used "
+                              "instead of the default inline advisor."),
+                     cl::value_desc("dynamic library path."));
 
 static cl::opt<std::string> DLInlineAdivisorCTX(
-    "dl-inline-advisor-ctx",
-    cl::init(""),
+    "dl-inline-advisor-ctx", cl::init(""),
     cl::desc(
         "String passed to dynamic inline advisor to modify it's behaviour."),
     cl::value_desc("dynamic library context."));
@@ -227,6 +247,10 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
       Advisor = llvm::getReplayInlineAdvisor(M, FAM, M.getContext(),
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
+    }
+    if (DLInlineAdivisor.Factory != nullptr) {
+      Advisor = DLInlineAdivisor.Factory(M, FAM, M.getContext(),
+                                         std::move(Advisor), IC);
     }
     break;
   case InliningAdvisorMode::Development:
@@ -540,12 +564,6 @@ InlineAdvisor::InlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
         std::make_unique<ImportedFunctionsInliningStatistics>();
     ImportedFunctionsStats->setModuleInfo(M);
   }
-  if (!DLInlineAdivisorPath.empty()) {
-    dl_handle = dlopen(DLInlineAdivisorPath.c_str(), RTLD_LAZY);
-    dyn_advisor = (dyn_advice_fn)dlsym(dl_handle, "dynamic_getAdvice");
-  } else {
-    dl_handle = nullptr;
-  }
 }
 
 InlineAdvisor::~InlineAdvisor() {
@@ -554,8 +572,6 @@ InlineAdvisor::~InlineAdvisor() {
     ImportedFunctionsStats->dump(InlinerFunctionImportStats ==
                                  InlinerFunctionImportStatsOpts::Verbose);
   }
-  if (dl_handle != nullptr)
-    dlclose(dl_handle);
 }
 
 std::unique_ptr<InlineAdvice> InlineAdvisor::getMandatoryAdvice(CallBase &CB,
@@ -631,20 +647,12 @@ InlineAdvisor::getMandatoryKind(CallBase &CB, FunctionAnalysisManager &FAM,
 
 std::unique_ptr<InlineAdvice> InlineAdvisor::getAdvice(CallBase &CB,
                                                        bool MandatoryOnly) {
-  std::unique_ptr<InlineAdvice> out;
   if (!MandatoryOnly)
-    out = getAdviceImpl(CB);
-  else {
-    bool Advice = CB.getCaller() != CB.getCalledFunction() &&
-                  MandatoryInliningKind::Always ==
-                      getMandatoryKind(CB, FAM, getCallerORE(CB));
-    out = getMandatoryAdvice(CB, Advice);
-  }
-
-  if (dl_handle != nullptr)
-    dyn_advisor(this, &getCallerORE(CB), &CB, &MandatoryOnly, &out, &DLInlineAdivisorCTX.getValue());
-
-  return out;
+    return getAdviceImpl(CB);
+  bool Advice = CB.getCaller() != CB.getCalledFunction() &&
+                MandatoryInliningKind::Always ==
+                    getMandatoryKind(CB, FAM, getCallerORE(CB));
+  return getMandatoryAdvice(CB, Advice);
 }
 
 OptimizationRemarkEmitter &InlineAdvisor::getCallerORE(CallBase &CB) {
