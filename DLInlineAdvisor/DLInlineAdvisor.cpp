@@ -100,10 +100,74 @@ std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
   seenInlineLocations.push_back(getLocString(loc, false));
   CallLocation = getLocString(loc, true);
 
+  switch (advice_mode) {
+  case FALSE:
+    defaultAdvice->recordUnattemptedInlining();
+    defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, false);
+    break;
+  case TRUE:
+    defaultAdvice->recordUnattemptedInlining();
+    defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, true);
+    break;
+  case OVERRIDE:
+    if (advice_map.find(CallLocation) != advice_map.end()) {
+      defaultAdvice->recordUnattemptedInlining();
+      defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE,
+                                                     advice_map[CallLocation]);
+    }
+    break;
+  }
+
   std::stringstream ss{};
   ss << caller << "->" << callee << " @ " << CallLocation << " : "
      << (defaultAdvice->isInliningRecommended() ? "inline" : "no-inline");
   decisionsTaken.push_back(ss.str());
 
   return defaultAdvice;
+}
+
+void DLInlineAdvisor::parseAdviceFile(std::string &filename) {
+  std::ifstream file(filename);
+
+  enum {
+    NODE_LIST_HEADER,
+    NODE_LIST,
+    DECISION_LIST,
+    ERROR,
+  } state = NODE_LIST_HEADER;
+
+  std::string line;
+  while (std::getline(file, line)) {
+    switch (state) {
+    case NODE_LIST_HEADER: {
+      if (line == "locations seen: ") {
+        state = NODE_LIST;
+      } else {
+        state = ERROR;
+      }
+    } break;
+    case NODE_LIST: {
+      if (line == "decisions made: ") {
+        state = DECISION_LIST;
+      }
+    } break;
+    case DECISION_LIST: {
+      std::istringstream iss(line);
+      std::string tmp;
+      std::string callee;
+      std::string location;
+      std::string decision;
+      if (!(iss >> callee >> tmp >> location >> tmp >> decision)) {
+        state = ERROR;
+      } else {
+        adviceMap.insert({location, decision == "inline"});
+      }
+    } break;
+    }
+  }
+
+  if (state == ERROR) {
+    std::cerr << "error parsing advice file" << std::endl;
+    exit(1);
+  }
 }

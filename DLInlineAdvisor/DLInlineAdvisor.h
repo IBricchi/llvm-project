@@ -37,5 +37,7 @@ private:
   std::vector<std::string> seenInlineLocations;
   std::vector<std::string> decisionsTaken;
 
+  void parseAdviceFile(std::string& filename);
+
 };
 } // namespace llvm
