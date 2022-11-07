@@ -35,8 +35,24 @@ DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                                  LLVMContext &Context,
                                  std::unique_ptr<InlineAdvisor> OriginalAdvisor,
                                  InlineContext IC)
-    : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)),
-      adviceMode(AdviceModes::DEFAULT) {}
+    : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {
+
+  // this is going to be passed by constructor
+  // once I get constructor working properly
+  std::string ctx = "";
+  if (ctx == "false") {
+    adviceMode = AdviceModes::FALSE
+  } else if (ctx == "true") {
+    adviceMode = AdviceModes::TRUE;
+  } else if (ctx == "default") {
+    adviceMode = AdviceModes::DEFAULT;
+  } else if (!ctx.empty()) {
+    adviceMode = AdviceModes::OVERRIDE;
+    parseAdviceFile(ctx);
+  } else {
+    adviceMode = AdviceModes::DEFAULT;
+  }
+}
 
 void DLInlineAdvisor::onPassEntry(LazyCallGraph::SCC *SCC){};
 
