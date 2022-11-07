@@ -69,19 +69,24 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 
 /// Flag to path of dynamic libarary
 struct DLInlineAdvisorInfo {
-  typedef std::unique_ptr<InlineAdvisor> (*DLAdivsorFactory_t)(
+  typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
       Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
       std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC);
 
   std::string Path;
 
   void *Handle;
-  DLAdivsorFactory_t Factory;
+  DLInlineAdivsorFactory_t Factory;
 
   DLInlineAdvisorInfo() : Path{}, Handle(nullptr), Factory(nullptr) {}
   DLInlineAdvisorInfo(const std::string &Path) : Path(Path) {
     Handle = dlopen(Path.c_str(), RTLD_LAZY);
-    Factory = (DLAdivsorFactory_t)dlsym(Handle, "DLAdivsorFactory");
+    if(!Handle) {
+      errs() << "Cannot open library: " << dlerror() << '\n';
+    }
+    else{
+      Factory = (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
+    }
   }
   ~DLInlineAdvisorInfo() {
     if (Handle)
@@ -248,7 +253,9 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
     }
+    __builtin_printf("dl_inliner_path: %s\n", DLInlineAdivisor.Path.c_str());
     if (DLInlineAdivisor.Factory != nullptr) {
+      __builtin_printf("Using Dynamic Advisor\n");
       Advisor = DLInlineAdivisor.Factory(M, FAM, M.getContext(),
                                          std::move(Advisor), IC);
     }
