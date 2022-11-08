@@ -41,7 +41,7 @@ DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
   // once I get constructor working properly
   std::string ctx = "";
   if (ctx == "false") {
-    adviceMode = AdviceModes::FALSE
+    adviceMode = AdviceModes::FALSE;
   } else if (ctx == "true") {
     adviceMode = AdviceModes::TRUE;
   } else if (ctx == "default") {
@@ -116,20 +116,20 @@ std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
   seenInlineLocations.push_back(getLocString(loc, false));
   CallLocation = getLocString(loc, true);
 
-  switch (advice_mode) {
-  case FALSE:
+  switch (adviceMode) {
+  case AdviceModes::FALSE:
     defaultAdvice->recordUnattemptedInlining();
-    defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, false);
+    defaultAdvice = std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), false);
     break;
-  case TRUE:
+  case AdviceModes::TRUE:
     defaultAdvice->recordUnattemptedInlining();
-    defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE, true);
+    defaultAdvice = std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), true);
     break;
-  case OVERRIDE:
-    if (advice_map.find(CallLocation) != advice_map.end()) {
+  case AdviceModes::OVERRIDE:
+    if (adviceMap.find(CallLocation) != adviceMap.end()) {
       defaultAdvice->recordUnattemptedInlining();
-      defaultAdvice = std::make_unique<InlineAdvice>(&advisor, CB, ORE,
-                                                     advice_map[CallLocation]);
+      defaultAdvice = std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB),
+                                                     adviceMap[CallLocation]);
     }
     break;
   }
