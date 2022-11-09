@@ -27,6 +27,7 @@ using namespace llvm;
 extern "C" std::unique_ptr<InlineAdvisor> DLInlineAdvisorFactory(
     Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
     std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC) {
+  __builtin_printf("called factory\n");
   return std::make_unique<DLInlineAdvisor>(M, FAM, Context,
                                            std::move(OriginalAdvisor), IC);
 }
@@ -36,6 +37,7 @@ DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                                  std::unique_ptr<InlineAdvisor> OriginalAdvisor,
                                  InlineContext IC)
     : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {
+  std::cout << "Called constructor\n";
 
   // this is going to be passed by constructor
   // once I get constructor working properly
@@ -54,7 +56,9 @@ DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
   }
 }
 
-void DLInlineAdvisor::onPassEntry(LazyCallGraph::SCC *SCC){};
+void DLInlineAdvisor::onPassEntry(LazyCallGraph::SCC *SCC){
+  std::cout << "Entered" << std::endl;
+};
 
 void DLInlineAdvisor::onPassExit(LazyCallGraph::SCC *SCC) {
   std::cout << "locations seen: " << std::endl;

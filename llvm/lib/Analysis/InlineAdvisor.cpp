@@ -85,7 +85,14 @@ struct DLInlineAdvisorInfo {
       errs() << "Cannot open library: " << dlerror() << '\n';
     }
     else{
+      dbgs() << "Library opened successfully\n";
       Factory = (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
+      if(!Factory){
+        errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror() << "\n";
+      }
+      else{
+        dbgs() << "Function DLInlineAdvisorFactory found successfully\n";
+      }
     }
   }
   ~DLInlineAdvisorInfo() {
