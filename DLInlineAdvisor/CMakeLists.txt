@@ -1,8 +1,5 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.16)
 project(DLInlineAdvisorLib LANGUAGES CXX C)
-
-list(APPEND CMAKE_PREFIX_PATH /home/ibricchi/llvm/build/)
-list(APPEND CMAKE_PREFIX_PATH /home/ibricchi/llvm/build/tools/clang/)
 
 find_package(LLVM REQUIRED CONFIG)
 
