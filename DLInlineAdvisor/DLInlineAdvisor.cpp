@@ -175,7 +175,6 @@ std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
   ss << caller << "->" << callee << " @ " << CallLocation << " : "
      << (defaultAdvice->isInliningRecommended() ? "inline" : "no-inline");
   
-  dbgs() << ss.str() << "\n";
   decisionsTaken.push_back(ss.str());
 
   return defaultAdvice;

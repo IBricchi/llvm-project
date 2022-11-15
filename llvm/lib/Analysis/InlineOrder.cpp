@@ -235,18 +235,12 @@ public:
       }
     }
 
-    Depth = 0;
+    Depth = std::numeric_limits<int>::max();
     for (int depth : Depths) {
-      if (depth > Depth) {
+      if (depth < Depth) {
         Depth = depth;
       }
     }
-
-    if (Depth == 0){
-      Depth = std::numeric_limits<int>::max();
-    }
-
-    dbgs() << "TopDownPriority: Depth = " << Depth << "\n";
   }
 
   static bool isMoreDesirable(const TopDownPriority &P1,
