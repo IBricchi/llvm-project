@@ -15,7 +15,7 @@ class DLInlineAdvisor : public InlineAdvisor {
 public:
   DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
                   std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                  InlineContext IC);
+                  InlineContext IC, std::string& DLCTX);
 
   virtual void onPassEntry(LazyCallGraph::SCC *SCC = nullptr) override;
   virtual void onPassExit(LazyCallGraph::SCC *SCC = nullptr) override;
@@ -34,7 +34,6 @@ private:
 
   std::unordered_map<std::string, bool> adviceMap;
 
-  std::vector<std::string> seenInlineLocations;
   std::vector<std::string> decisionsTaken;
 
   void parseAdviceFile(std::string& filename);

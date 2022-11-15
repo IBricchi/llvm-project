@@ -71,7 +71,7 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 struct DLInlineAdvisorInfo {
   typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
       Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC);
+      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC, std::string& DLCTX);
 
   std::string Path;
 
@@ -96,8 +96,8 @@ struct DLInlineAdvisorInfo {
     }
   }
   ~DLInlineAdvisorInfo() {
-    if (Handle)
-      dlclose(Handle);
+    // if (Handle)
+    //   dlclose(Handle);
   }
 };
 
@@ -260,11 +260,9 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
     }
-    __builtin_printf("dl_inliner_path: %s\n", DLInlineAdivisor.Path.c_str());
     if (DLInlineAdivisor.Factory != nullptr) {
-      __builtin_printf("Using Dynamic Advisor\n");
       Advisor = DLInlineAdivisor.Factory(M, FAM, M.getContext(),
-                                         std::move(Advisor), IC);
+                                         std::move(Advisor), IC, DLInlineAdivisorCTX);
     }
     break;
   case InliningAdvisorMode::Development:

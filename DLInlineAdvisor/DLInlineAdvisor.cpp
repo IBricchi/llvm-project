@@ -2,6 +2,7 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/InlineAdvisor.h"
 #include "llvm/Analysis/InlineCost.h"
+#include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/ReplayInlineAdvisor.h"
@@ -9,6 +10,7 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/Utils/ImportedFunctionsInliningStatistics.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
@@ -24,58 +26,14 @@
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 
-extern "C" std::unique_ptr<InlineAdvisor> DLInlineAdvisorFactory(
-    Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-    std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC) {
-  __builtin_printf("called factory\n");
-  return std::make_unique<DLInlineAdvisor>(M, FAM, Context,
-                                           std::move(OriginalAdvisor), IC);
+extern "C" std::unique_ptr<InlineAdvisor>
+DLInlineAdvisorFactory(Module &M, FunctionAnalysisManager &FAM,
+                       LLVMContext &Context,
+                       std::unique_ptr<InlineAdvisor> OriginalAdvisor,
+                       InlineContext IC, std::string &DLCTX) {
+  return std::make_unique<DLInlineAdvisor>(
+      M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
 }
-
-DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
-                                 LLVMContext &Context,
-                                 std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                                 InlineContext IC)
-    : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {
-  std::cout << "Called constructor\n";
-
-  // this is going to be passed by constructor
-  // once I get constructor working properly
-  std::string ctx = "";
-  if (ctx == "false") {
-    adviceMode = AdviceModes::FALSE;
-  } else if (ctx == "true") {
-    adviceMode = AdviceModes::TRUE;
-  } else if (ctx == "default") {
-    adviceMode = AdviceModes::DEFAULT;
-  } else if (!ctx.empty()) {
-    adviceMode = AdviceModes::OVERRIDE;
-    parseAdviceFile(ctx);
-  } else {
-    adviceMode = AdviceModes::DEFAULT;
-  }
-}
-
-void DLInlineAdvisor::onPassEntry(LazyCallGraph::SCC *SCC){
-  std::cout << "Entered" << std::endl;
-};
-
-void DLInlineAdvisor::onPassExit(LazyCallGraph::SCC *SCC) {
-  std::cout << "locations seen: " << std::endl;
-  for (std::string &loc : seenInlineLocations) {
-    std::cout << loc << std::endl;
-  }
-  std::cout << "decisions made: " << std::endl;
-  for (std::string &decision : decisionsTaken) {
-    std::cout << decision << std::endl;
-  }
-  if (adviceMode == AdviceModes::OVERRIDE) {
-    std::cout << "advice map: " << std::endl;
-    for (auto &pair : adviceMap) {
-      std::cout << pair.first << " -> " << pair.second << std::endl;
-    }
-  }
-};
 
 static inline std::string getLocString(DebugLoc loc, bool show_inlining) {
   std::string OS{};
@@ -104,8 +62,80 @@ static inline std::string getLocString(DebugLoc loc, bool show_inlining) {
 }
 
 static inline std::string getFnString(Function *F) {
-  // this needs to be more complete
   return F->getName().str();
+}
+
+// #define DOT_FORMAT
+
+DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
+                                 LLVMContext &Context,
+                                 std::unique_ptr<InlineAdvisor> OriginalAdvisor,
+                                 InlineContext IC, std::string &DLCTX)
+    : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {
+  // this is going to be passed by constructor
+  // once I get constructor working properly
+  if (DLCTX == "false") {
+    adviceMode = AdviceModes::FALSE;
+  } else if (DLCTX == "true") {
+    adviceMode = AdviceModes::TRUE;
+  } else if (DLCTX == "default") {
+    adviceMode = AdviceModes::DEFAULT;
+  } else if (!DLCTX.empty()) {
+    adviceMode = AdviceModes::OVERRIDE;
+    parseAdviceFile(DLCTX);
+  } else {
+    adviceMode = AdviceModes::DEFAULT;
+  }
+
+  // print all call caller/callee pairs
+  std::cout << "Call Graph:" << std::endl;
+#ifdef DOT_FORMAT
+  std::cout << "digraph {" << std::endl;
+#endif
+  for (auto &F : M) {
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        if (auto *CB = dyn_cast<CallBase>(&I)) {
+          if (CB->getCalledFunction()) {
+            // continue if this is llvm intrinsic
+            if (CB->getCalledFunction()->isIntrinsic()) {
+              continue;
+            }
+            std::string caller = getFnString(CB->getCaller());
+            // add debug info to caller
+            std::string caller_loc = getLocString(CB->getDebugLoc(), false);
+            std::string callee = getFnString(CB->getCalledFunction());
+            #ifdef DOT_FORMAT
+            std::string location =
+                caller + "->" + callee + " [label=\"" + caller_loc + "\"]";
+                #else
+            std::string location =
+                caller + "->" + callee + " @ " + caller_loc;
+            #endif
+            std::cout << location << std::endl;
+          }
+        }
+      }
+    }
+  }
+#ifdef DOT_FORMAT
+  std::cout << "}" << std::endl;
+#endif
+}
+
+void DLInlineAdvisor::onPassEntry(LazyCallGraph::SCC *SCC) {}
+
+void DLInlineAdvisor::onPassExit(LazyCallGraph::SCC *SCC) {
+  std::cout << "Decisions: " << std::endl;
+  for (std::string &decision : decisionsTaken) {
+    std::cout << decision << std::endl;
+  }
+  // if (adviceMode == AdviceModes::OVERRIDE) {
+  //   std::cout << "Advice Map: " << std::endl;
+  //   for (auto &pair : adviceMap) {
+  //     std::cout << pair.first << " -> " << pair.second << std::endl;
+  //   }
+  // }
 }
 
 std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
@@ -117,17 +147,18 @@ std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
   std::string CallLocation{};
 
   DebugLoc loc = defaultAdvice->getOriginalCallSiteDebugLoc();
-  seenInlineLocations.push_back(getLocString(loc, false));
   CallLocation = getLocString(loc, true);
 
   switch (adviceMode) {
   case AdviceModes::FALSE:
     defaultAdvice->recordUnattemptedInlining();
-    defaultAdvice = std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), false);
+    defaultAdvice =
+        std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), false);
     break;
   case AdviceModes::TRUE:
     defaultAdvice->recordUnattemptedInlining();
-    defaultAdvice = std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), true);
+    defaultAdvice =
+        std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), true);
     break;
   case AdviceModes::OVERRIDE:
     if (adviceMap.find(CallLocation) != adviceMap.end()) {
@@ -135,6 +166,8 @@ std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
       defaultAdvice = std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB),
                                                      adviceMap[CallLocation]);
     }
+    break;
+  case AdviceModes::DEFAULT:
     break;
   }
 
@@ -149,44 +182,32 @@ std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
 void DLInlineAdvisor::parseAdviceFile(std::string &filename) {
   std::ifstream file(filename);
 
-  enum {
-    NODE_LIST_HEADER,
-    NODE_LIST,
-    DECISION_LIST,
-    ERROR,
-  } state = NODE_LIST_HEADER;
+  // error reading file
+  bool error = false;
 
+  // read file line by line untill Decisions is found
   std::string line;
   while (std::getline(file, line)) {
-    switch (state) {
-    case NODE_LIST_HEADER: {
-      if (line == "locations seen: ") {
-        state = NODE_LIST;
-      } else {
-        state = ERROR;
-      }
-    } break;
-    case NODE_LIST: {
-      if (line == "decisions made: ") {
-        state = DECISION_LIST;
-      }
-    } break;
-    case DECISION_LIST: {
-      std::istringstream iss(line);
-      std::string tmp;
-      std::string callee;
-      std::string location;
-      std::string decision;
-      if (!(iss >> callee >> tmp >> location >> tmp >> decision)) {
-        state = ERROR;
-      } else {
-        adviceMap.insert({location, decision == "inline"});
-      }
-    } break;
+    if (line == "Decisions:") {
+      break;
+    }
+  }
+  // read file line by line untill EOF
+  while (std::getline(file, line)) {
+    std::istringstream iss(line);
+    std::string tmp;
+    std::string callee;
+    std::string location;
+    std::string decision;
+    if (!(iss >> callee >> tmp >> location >> tmp >> decision)) {
+      error = false;
+      break;
+    } else {
+      adviceMap.insert({location, decision == "inline"});
     }
   }
 
-  if (state == ERROR) {
+  if (error) {
     std::cerr << "error parsing advice file" << std::endl;
     exit(1);
   }
