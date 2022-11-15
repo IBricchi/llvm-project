@@ -65,7 +65,7 @@ static inline std::string getFnString(Function *F) {
   return F->getName().str();
 }
 
-// #define DOT_FORMAT
+#define DOT_FORMAT
 
 DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                                  LLVMContext &Context,
@@ -107,10 +107,10 @@ DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
             std::string callee = getFnString(CB->getCalledFunction());
             #ifdef DOT_FORMAT
             std::string location =
-                caller + "->" + callee + " [label=\"" + caller_loc + "\"]";
+                caller + " -> " + callee + " [label=\"" + caller_loc + "\"]";
                 #else
             std::string location =
-                caller + "->" + callee + " @ " + caller_loc;
+                caller + " -> " + callee + " @ " + caller_loc;
             #endif
             std::cout << location << std::endl;
           }
@@ -174,6 +174,8 @@ std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
   std::stringstream ss{};
   ss << caller << "->" << callee << " @ " << CallLocation << " : "
      << (defaultAdvice->isInliningRecommended() ? "inline" : "no-inline");
+  
+  dbgs() << ss.str() << "\n";
   decisionsTaken.push_back(ss.str());
 
   return defaultAdvice;

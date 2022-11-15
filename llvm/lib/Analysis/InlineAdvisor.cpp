@@ -68,41 +68,59 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 }
 
 /// Flag to path of dynamic libarary
-struct DLInlineAdvisorInfo {
+class DLInlineAdvisorInfo {
   typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
       Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
       std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
       std::string &DLCTX);
 
+  cl::opt<std::string> *Path;
   void *Handle;
   DLInlineAdivsorFactory_t Factory;
 
+public:
   DLInlineAdvisorInfo() : Handle(nullptr), Factory(nullptr) {}
-  DLInlineAdvisorInfo(const std::string &Path) {
-    Handle = dlopen(Path.c_str(), RTLD_LAZY);
-    if (!Handle) {
-      errs() << "Cannot open library: " << dlerror() << '\n';
-    } else {
-      dbgs() << "Library opened successfully\n";
-      Factory =
-          (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
-      if (!Factory) {
-        errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror()
-               << "\n";
+  DLInlineAdvisorInfo(cl::opt<std::string> *Path)
+      : Path(Path), Handle(nullptr), Factory(nullptr) {}
+  std::unique_ptr<InlineAdvisor> factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
+          std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
+          std::string &DLCTX) {
+    if (!Handle && Path->getNumOccurrences() > 0) {
+      Handle = dlopen(Path->c_str(), RTLD_LAZY);
+      if (!Handle) {
+        errs() << "Cannot open library: " << dlerror() << '\n';
       } else {
-        dbgs() << "Function DLInlineAdvisorFactory found successfully\n";
+        dbgs() << "Library opened successfully\n";
+        Factory =
+            (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
+        if (!Factory) {
+          errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror()
+                 << "\n";
+        } else {
+          dbgs() << "Function DLInlineAdvisorFactory found successfully\n";
+        }
       }
     }
+    if (Factory) {
+      return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
+    }
+  }
+
+  ~DLInlineAdvisorInfo() {
+    if (Handle)
+      dlclose(Handle);
   }
 };
 
-static cl::opt<DLInlineAdvisorInfo, false, cl::parser<std::string>>
-    DLInlineAdivisor("dl-inline-advisor-path",
-                     cl::desc("Path to a dynamic library that can be used "
-                              "instead of the default inline advisor."),
-                     cl::value_desc("dynamic library path."));
+static cl::opt<std::string>
+    DLInlineAdvisorPath("dl-inline-advisor-path",
+                         cl::desc("Path to a dynamic library that can be used "
+                                  "instead of the default inline advisor."),
+                         cl::value_desc("dynamic library path."));
 
-static cl::opt<std::string> DLInlineAdivisorCTX(
+static DLInlineAdvisorInfo DLInlineAdvisor(&DLInlineAdvisorPath);
+
+static cl::opt<std::string> DLInlineAdvisorCTX(
     "dl-inline-advisor-ctx", cl::init(""),
     cl::desc(
         "String passed to dynamic inline advisor to modify it's behaviour."),
@@ -255,9 +273,9 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
     }
-    if (DLInlineAdivisor.Factory != nullptr) {
-      Advisor = DLInlineAdivisor.Factory(
-          M, FAM, M.getContext(), std::move(Advisor), IC, DLInlineAdivisorCTX);
+    if (DLInlineAdvisorPath.getNumOccurrences() > 0) {
+      Advisor = DLInlineAdvisor.factory(
+          M, FAM, M.getContext(), std::move(Advisor), IC, DLInlineAdvisorCTX);
     }
     break;
   case InliningAdvisorMode::Development:
