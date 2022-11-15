@@ -126,16 +126,16 @@ DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
 void DLInlineAdvisor::onPassEntry(LazyCallGraph::SCC *SCC) {}
 
 void DLInlineAdvisor::onPassExit(LazyCallGraph::SCC *SCC) {
-  std::cout << "Decisions: " << std::endl;
+  std::cout << "Decisions:" << std::endl;
   for (std::string &decision : decisionsTaken) {
     std::cout << decision << std::endl;
   }
-  // if (adviceMode == AdviceModes::OVERRIDE) {
-  //   std::cout << "Advice Map: " << std::endl;
-  //   for (auto &pair : adviceMap) {
-  //     std::cout << pair.first << " -> " << pair.second << std::endl;
-  //   }
-  // }
+  if (adviceMode == AdviceModes::OVERRIDE) {
+    std::cout << "Advice Map:" << std::endl;
+    for (auto &pair : adviceMap) {
+      std::cout << pair.first << " -> " << pair.second << std::endl;
+    }
+  }
 }
 
 std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
@@ -188,7 +188,7 @@ void DLInlineAdvisor::parseAdviceFile(std::string &filename) {
   // read file line by line untill Decisions is found
   std::string line;
   while (std::getline(file, line)) {
-    if (line == "Decisions:") {
+    if (line.find("Decisions:") != std::string::npos) {
       break;
     }
   }
