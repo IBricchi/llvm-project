@@ -71,33 +71,28 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 struct DLInlineAdvisorInfo {
   typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
       Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC, std::string& DLCTX);
-
-  std::string Path;
+      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
+      std::string &DLCTX);
 
   void *Handle;
   DLInlineAdivsorFactory_t Factory;
 
-  DLInlineAdvisorInfo() : Path{}, Handle(nullptr), Factory(nullptr) {}
-  DLInlineAdvisorInfo(const std::string &Path) : Path(Path) {
+  DLInlineAdvisorInfo() : Handle(nullptr), Factory(nullptr) {}
+  DLInlineAdvisorInfo(const std::string &Path) {
     Handle = dlopen(Path.c_str(), RTLD_LAZY);
-    if(!Handle) {
+    if (!Handle) {
       errs() << "Cannot open library: " << dlerror() << '\n';
-    }
-    else{
+    } else {
       dbgs() << "Library opened successfully\n";
-      Factory = (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
-      if(!Factory){
-        errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror() << "\n";
-      }
-      else{
+      Factory =
+          (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
+      if (!Factory) {
+        errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror()
+               << "\n";
+      } else {
         dbgs() << "Function DLInlineAdvisorFactory found successfully\n";
       }
     }
-  }
-  ~DLInlineAdvisorInfo() {
-    // if (Handle)
-    //   dlclose(Handle);
   }
 };
 
@@ -261,8 +256,8 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              /* EmitRemarks =*/true, IC);
     }
     if (DLInlineAdivisor.Factory != nullptr) {
-      Advisor = DLInlineAdivisor.Factory(M, FAM, M.getContext(),
-                                         std::move(Advisor), IC, DLInlineAdivisorCTX);
+      Advisor = DLInlineAdivisor.Factory(
+          M, FAM, M.getContext(), std::move(Advisor), IC, DLInlineAdivisorCTX);
     }
     break;
   case InliningAdvisorMode::Development:

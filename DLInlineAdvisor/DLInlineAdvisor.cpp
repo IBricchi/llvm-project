@@ -130,12 +130,12 @@ void DLInlineAdvisor::onPassExit(LazyCallGraph::SCC *SCC) {
   for (std::string &decision : decisionsTaken) {
     std::cout << decision << std::endl;
   }
-  if (adviceMode == AdviceModes::OVERRIDE) {
-    std::cout << "Advice Map:" << std::endl;
-    for (auto &pair : adviceMap) {
-      std::cout << pair.first << " -> " << pair.second << std::endl;
-    }
-  }
+  // if (adviceMode == AdviceModes::OVERRIDE) {
+  //   std::cout << "Advice Map:" << std::endl;
+  //   for (auto &pair : adviceMap) {
+  //     std::cout << pair.first << " -> " << pair.second << std::endl;
+  //   }
+  // }
 }
 
 std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
