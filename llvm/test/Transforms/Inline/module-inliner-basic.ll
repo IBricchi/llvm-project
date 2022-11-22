@@ -3,6 +3,7 @@
 ; RUN: opt -passes=module-inline -inline-priority-mode=cost         -S < %s | FileCheck %s
 ; RUN: opt -passes=module-inline -inline-priority-mode=cost-benefit -S < %s | FileCheck %s
 ; RUN: opt -passes=module-inline -inline-priority-mode=ml           -S < %s | FileCheck %s
+; RUN: opt -passes=module-inline -inline-priority-mode=top-down     -S < %s | FileCheck %s
 
 define i32 @callee(i32 %a) {
 entry:
