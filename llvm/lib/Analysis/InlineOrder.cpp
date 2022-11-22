@@ -16,13 +16,16 @@
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/Support/CommandLine.h"
+
+#include <queue>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "inline-order"
 
-enum class InlinePriorityMode : int { Size, Cost, CostBenefit, ML };
+enum class InlinePriorityMode : int { Size, Cost, CostBenefit, ML, TopDown };
 
 static cl::opt<InlinePriorityMode> UseInlinePriority(
     "inline-priority-mode", cl::init(InlinePriorityMode::Size), cl::Hidden,
@@ -34,7 +37,9 @@ static cl::opt<InlinePriorityMode> UseInlinePriority(
                clEnumValN(InlinePriorityMode::CostBenefit, "cost-benefit",
                           "Use cost-benefit ratio."),
                clEnumValN(InlinePriorityMode::ML, "ml",
-                          "Use ML.")));
+                          "Use ML."),
+               clEnumValN(InlinePriorityMode::TopDown, "top-down",
+                          "Use callgraph top-down priority.")));
 
 static cl::opt<int> ModuleInlinerTopPriorityThreshold(
     "moudle-inliner-top-priority-threshold", cl::Hidden, cl::init(0),
@@ -197,6 +202,78 @@ private:
   int Cost = INT_MAX;
 };
 
+class TopDownPriority {
+public:
+  TopDownPriority() = default;
+  TopDownPriority(const CallBase *CB, FunctionAnalysisManager &FAM,
+                  const InlineParams &Params) {
+
+    Depth = 0;
+    const Module *M = CB->getModule();
+
+    std::unordered_map<std::string, std::vector<std::string>> RevCallGraph;
+
+    for (auto &F : *M) {
+      for (auto &BB : F) {
+        for (auto &I : BB) {
+          if (auto *CB = dyn_cast<CallBase>(&I)) {
+            if (CB->getCalledFunction()) {
+              // continue if this is llvm intrinsic
+              if (CB->getCalledFunction()->isIntrinsic()) {
+                continue;
+              }
+              std::string caller = CB->getCaller()->getName().str();
+              std::string callee = CB->getCalledFunction()->getName().str();
+              if (RevCallGraph.find(callee) == RevCallGraph.end()) {
+                RevCallGraph[callee] = std::vector<std::string>();
+              }
+              RevCallGraph[callee].push_back(caller);
+            }
+          }
+        }
+      }
+    }
+
+    std::queue<std::pair<std::string, int>> Working;
+    std::set<std::string> Visited;
+    std::vector<int> Depths;
+
+    Working.push(std::make_pair(CB->getCaller()->getName().str(), 1));
+
+    while(!Working.empty()) {
+      auto cur = Working.front();
+      Working.pop();
+      if (Visited.find(cur.first) != Visited.end()) {
+        continue;
+      }
+      Visited.insert(cur.first);
+      if(RevCallGraph.find(cur.first) != RevCallGraph.end()) {
+        for (auto &caller : RevCallGraph[cur.first]) {
+          Working.push(std::make_pair(caller, cur.second + 1));
+        }
+      }
+      else{
+        Depths.push_back(cur.second);
+      }
+    }
+
+    Depth = std::numeric_limits<int>::max();
+    for (int depth : Depths) {
+      if (depth < Depth) {
+        Depth = depth;
+      }
+    }
+  }
+
+  static bool isMoreDesirable(const TopDownPriority &P1,
+                              const TopDownPriority &P2) {
+    return P1.Depth < P2.Depth;
+  }
+
+private:
+  int Depth;
+};
+
 template <typename PriorityT>
 class PriorityInlineOrder : public InlineOrder<std::pair<CallBase *, int>> {
   using T = std::pair<CallBase *, int>;
@@ -295,11 +372,14 @@ llvm::getInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params) {
   case InlinePriorityMode::CostBenefit:
     LLVM_DEBUG(
         dbgs() << "    Current used priority: cost-benefit priority ---- \n");
-    return std::make_unique<PriorityInlineOrder<CostBenefitPriority>>(FAM, Params);
   case InlinePriorityMode::ML:
     LLVM_DEBUG(
         dbgs() << "    Current used priority: ML priority ---- \n");
     return std::make_unique<PriorityInlineOrder<MLPriority>>(FAM, Params);
+  case InlinePriorityMode::TopDown:
+    LLVM_DEBUG(
+        dbgs() << "    Current used priority: top-down priority ---- \n");
+    return std::make_unique<PriorityInlineOrder<TopDownPriority>>(FAM, Params);
   }
   return nullptr;
 }
