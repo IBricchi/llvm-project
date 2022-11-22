@@ -26,6 +26,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <dlfcn.h>
+
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 #ifdef LLVM_HAVE_TF_AOT_INLINERSIZEMODEL
@@ -62,6 +64,65 @@ static cl::opt<bool>
                                  "with LTO and pass information."));
 
 extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
+
+/// Flag to path of dynamic libarary
+class DLInlineAdvisorInfo {
+  typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
+      Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
+      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
+      std::string &DLCTX);
+
+  cl::opt<std::string> *Path;
+  void *Handle;
+  DLInlineAdivsorFactory_t Factory;
+
+public:
+  DLInlineAdvisorInfo() : Handle(nullptr), Factory(nullptr) {}
+  DLInlineAdvisorInfo(cl::opt<std::string> *Path)
+      : Path(Path), Handle(nullptr), Factory(nullptr) {}
+  std::unique_ptr<InlineAdvisor> factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
+          std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
+          std::string &DLCTX) {
+    if (!Handle && Path->getNumOccurrences() > 0) {
+      Handle = dlopen(Path->c_str(), RTLD_LAZY);
+      if (!Handle) {
+        errs() << "Cannot open library: " << dlerror() << '\n';
+      } else {
+        LLVM_DEBUG(dbgs() << "Library opened successfully\n";)
+        Factory =
+            (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
+        if (!Factory) {
+          errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror()
+                 << "\n";
+        } else {
+          LLVM_DEBUG(dbgs() << "Function DLInlineAdvisorFactory found successfully\n";)
+        }
+      }
+    }
+    if (Factory) {
+      return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
+    }
+  }
+
+  ~DLInlineAdvisorInfo() {
+    if (Handle)
+      dlclose(Handle);
+  }
+};
+
+static DLInlineAdvisorInfo DLInlineAdvisor(&DLInlineAdvisorPath);
+
+static cl::opt<std::string>
+    DLInlineAdvisorPath("dl-inline-advisor-path",
+                         cl::desc("Path to a dynamic library that can be used "
+                                  "instead of the default inline advisor."),
+                         cl::value_desc("dynamic library path."));
+
+static cl::opt<std::string> DLInlineAdvisorCTX(
+    "dl-inline-advisor-ctx", cl::init(""),
+    cl::desc(
+        "String passed to dynamic inline advisor to modify it's behaviour."),
+    cl::value_desc("dynamic library context."));
 
 namespace {
 using namespace llvm::ore;
@@ -209,6 +270,10 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
       Advisor = llvm::getReplayInlineAdvisor(M, FAM, M.getContext(),
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
+    }
+    if (DLInlineAdvisorPath.getNumOccurrences() > 0) {
+      Advisor = DLInlineAdvisor.factory(
+          M, FAM, M.getContext(), std::move(Advisor), IC, DLInlineAdvisorCTX);
     }
     break;
   case InliningAdvisorMode::Development:
