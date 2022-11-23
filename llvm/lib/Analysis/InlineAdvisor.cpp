@@ -65,16 +65,18 @@ static cl::opt<bool>
 
 extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 
-/// Flag to path of dynamic libarary
+/// Class to handle dynamic inliner
 class DLInlineAdvisorInfo {
   typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
       Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
       std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
       std::string &DLCTX);
 
-  cl::opt<std::string> *Path;
+  // dynamic library handler
   void *Handle;
   DLInlineAdivsorFactory_t Factory;
+
+  cl::opt<std::string> *Path;
 
 public:
   DLInlineAdvisorInfo() : Handle(nullptr), Factory(nullptr) {}
@@ -83,10 +85,12 @@ public:
   std::unique_ptr<InlineAdvisor> factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
           std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
           std::string &DLCTX) {
+    // check if command line has been specified and if so, load the library
     if (!Handle && Path->getNumOccurrences() > 0) {
       Handle = dlopen(Path->c_str(), RTLD_LAZY);
       if (!Handle) {
         errs() << "Cannot open library: " << dlerror() << '\n';
+        exit(1);
       } else {
         LLVM_DEBUG(dbgs() << "Library opened successfully\n";)
         Factory =
@@ -94,14 +98,13 @@ public:
         if (!Factory) {
           errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror()
                  << "\n";
+          exit(1);
         } else {
           LLVM_DEBUG(dbgs() << "Function DLInlineAdvisorFactory found successfully\n";)
         }
       }
     }
-    if (Factory) {
-      return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
-    }
+    return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
   }
 
   ~DLInlineAdvisorInfo() {
@@ -110,14 +113,15 @@ public:
   }
 };
 
-static DLInlineAdvisorInfo DLInlineAdvisor(&DLInlineAdvisorPath);
-
 static cl::opt<std::string>
     DLInlineAdvisorPath("dl-inline-advisor-path",
                          cl::desc("Path to a dynamic library that can be used "
                                   "instead of the default inline advisor."),
                          cl::value_desc("dynamic library path."));
 
+static DLInlineAdvisorInfo DLInlineAdvisor(&DLInlineAdvisorPath);
+
+/// Command line option to pass extrac context to the dynamic advisor through cli
 static cl::opt<std::string> DLInlineAdvisorCTX(
     "dl-inline-advisor-ctx", cl::init(""),
     cl::desc(
@@ -271,6 +275,7 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
     }
+    // Check if default advisor is enabled and use it if so
     if (DLInlineAdvisorPath.getNumOccurrences() > 0) {
       Advisor = DLInlineAdvisor.factory(
           M, FAM, M.getContext(), std::move(Advisor), IC, DLInlineAdvisorCTX);
