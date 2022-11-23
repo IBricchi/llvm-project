@@ -78,8 +78,9 @@ llvm::InlineCost getInlineCostWrapper(CallBase &CB,
 class SizePriority {
 public:
   SizePriority() = default;
-  SizePriority(const CallBase *CB, FunctionAnalysisManager &,
-               const InlineParams &) {
+  SizePriority(
+      const CallBase *CB, FunctionAnalysisManager &, const InlineParams &,
+      const std::unordered_map<std::string, std::vector<std::string>> &) {
     Function *Callee = CB->getCalledFunction();
     Size = Callee->getInstructionCount();
   }
@@ -95,8 +96,10 @@ private:
 class CostPriority {
 public:
   CostPriority() = default;
-  CostPriority(const CallBase *CB, FunctionAnalysisManager &FAM,
-               const InlineParams &Params) {
+  CostPriority(
+      const CallBase *CB, FunctionAnalysisManager &FAM,
+      const InlineParams &Params,
+      const std::unordered_map<std::string, std::vector<std::string>> &) {
     auto IC = getInlineCostWrapper(const_cast<CallBase &>(*CB), FAM, Params);
     if (IC.isVariable())
       Cost = IC.getCost();
@@ -115,8 +118,10 @@ private:
 class CostBenefitPriority {
 public:
   CostBenefitPriority() = default;
-  CostBenefitPriority(const CallBase *CB, FunctionAnalysisManager &FAM,
-                      const InlineParams &Params) {
+  CostBenefitPriority(
+      const CallBase *CB, FunctionAnalysisManager &FAM,
+      const InlineParams &Params,
+      const std::unordered_map<std::string, std::vector<std::string>> &) {
     auto IC = getInlineCostWrapper(const_cast<CallBase &>(*CB), FAM, Params);
     Cost = IC.getCost();
     StaticBonusApplied = IC.getStaticBonusApplied();
@@ -183,34 +188,13 @@ private:
 class TopDownPriority {
 public:
   TopDownPriority() = default;
-  TopDownPriority(const CallBase *CB, FunctionAnalysisManager &FAM,
-                  const InlineParams &Params) {
+  TopDownPriority(
+      const CallBase *CB, FunctionAnalysisManager &FAM,
+      const InlineParams &Params,
+      const std::unordered_map<std::string, std::vector<std::string>>
+          &RevCallGraph) {
 
     Depth = 0;
-    const Module *M = CB->getModule();
-
-    std::unordered_map<std::string, std::vector<std::string>> RevCallGraph;
-
-    for (auto &F : *M) {
-      for (auto &BB : F) {
-        for (auto &I : BB) {
-          if (auto *CB = dyn_cast<CallBase>(&I)) {
-            if (CB->getCalledFunction()) {
-              // continue if this is llvm intrinsic
-              if (CB->getCalledFunction()->isIntrinsic()) {
-                continue;
-              }
-              std::string caller = CB->getCaller()->getName().str();
-              std::string callee = CB->getCalledFunction()->getName().str();
-              if (RevCallGraph.find(callee) == RevCallGraph.end()) {
-                RevCallGraph[callee] = std::vector<std::string>();
-              }
-              RevCallGraph[callee].push_back(caller);
-            }
-          }
-        }
-      }
-    }
 
     std::queue<std::pair<std::string, int>> Working;
     std::set<std::string> Visited;
@@ -218,19 +202,18 @@ public:
 
     Working.push(std::make_pair(CB->getCaller()->getName().str(), 1));
 
-    while(!Working.empty()) {
+    while (!Working.empty()) {
       auto cur = Working.front();
       Working.pop();
       if (Visited.find(cur.first) != Visited.end()) {
         continue;
       }
       Visited.insert(cur.first);
-      if(RevCallGraph.find(cur.first) != RevCallGraph.end()) {
-        for (auto &caller : RevCallGraph[cur.first]) {
+      if (RevCallGraph.find(cur.first) != RevCallGraph.end()) {
+        for (auto &caller : RevCallGraph.at(cur.first)) {
           Working.push(std::make_pair(caller, cur.second + 1));
         }
-      }
-      else{
+      } else {
         Depths.push_back(cur.second);
       }
     }
@@ -266,7 +249,7 @@ class PriorityInlineOrder : public InlineOrder<std::pair<CallBase *, int>> {
   bool updateAndCheckDecreased(const CallBase *CB) {
     auto It = Priorities.find(CB);
     const auto OldPriority = It->second;
-    It->second = PriorityT(CB, FAM, Params);
+    It->second = PriorityT(CB, FAM, Params, RevCallGraph);
     const auto NewPriority = It->second;
     return PriorityT::isMoreDesirable(OldPriority, NewPriority);
   }
@@ -293,6 +276,35 @@ public:
     };
   }
 
+  PriorityInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params,
+                      const Module &M)
+      : FAM(FAM), Params(Params) {
+    isLess = [&](const CallBase *L, const CallBase *R) {
+      return hasLowerPriority(L, R);
+    };
+
+    for (auto &F : M) {
+      for (auto &BB : F) {
+        for (auto &I : BB) {
+          if (auto *CB = dyn_cast<CallBase>(&I)) {
+            if (CB->getCalledFunction()) {
+              // continue if this is llvm intrinsic
+              if (CB->getCalledFunction()->isIntrinsic()) {
+                continue;
+              }
+              std::string caller = CB->getCaller()->getName().str();
+              std::string callee = CB->getCalledFunction()->getName().str();
+              if (RevCallGraph.find(callee) == RevCallGraph.end()) {
+                RevCallGraph[callee] = std::vector<std::string>();
+              }
+              RevCallGraph[callee].push_back(caller);
+            }
+          }
+        }
+      }
+    }
+  }
+
   size_t size() override { return Heap.size(); }
 
   void push(const T &Elt) override {
@@ -300,7 +312,7 @@ public:
     const int InlineHistoryID = Elt.second;
 
     Heap.push_back(CB);
-    Priorities[CB] = PriorityT(CB, FAM, Params);
+    Priorities[CB] = PriorityT(CB, FAM, Params, RevCallGraph);
     std::push_heap(Heap.begin(), Heap.end(), isLess);
     InlineHistoryMap[CB] = InlineHistoryID;
   }
@@ -332,12 +344,14 @@ private:
   DenseMap<const CallBase *, PriorityT> Priorities;
   FunctionAnalysisManager &FAM;
   const InlineParams &Params;
+  std::unordered_map<std::string, std::vector<std::string>> RevCallGraph;
 };
 
 } // namespace
 
 std::unique_ptr<InlineOrder<std::pair<CallBase *, int>>>
-llvm::getInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params) {
+llvm::getInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params,
+                     const Module &M) {
   switch (UseInlinePriority) {
   case InlinePriorityMode::Size:
     LLVM_DEBUG(dbgs() << "    Current used priority: Size priority ---- \n");
@@ -356,7 +370,8 @@ llvm::getInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params) {
   case InlinePriorityMode::TopDown:
     LLVM_DEBUG(
         dbgs() << "    Current used priority: top-down priority ---- \n");
-    return std::make_unique<PriorityInlineOrder<TopDownPriority>>(FAM, Params);
+    return std::make_unique<PriorityInlineOrder<TopDownPriority>>(FAM, Params,
+                                                                  M);
   }
   return nullptr;
 }
