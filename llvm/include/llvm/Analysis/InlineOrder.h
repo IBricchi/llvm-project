@@ -32,7 +32,7 @@ public:
 };
 
 std::unique_ptr<InlineOrder<std::pair<CallBase *, int>>>
-getInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params, const Module &M);
+getInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params, Module &M);
 
 } // namespace llvm
 #endif // LLVM_ANALYSIS_INLINEORDER_H
