@@ -84,8 +84,8 @@ public:
   std::unique_ptr<InlineAdvisor> factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
           std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC) {
     // check if command line has been specified and if so, load the library
-    if (!Handle && Path.getNumOccurrences() > 0) {
-      Handle = dlopen(Path.c_str(), RTLD_LAZY);
+    if (!Handle && *Path != "") {
+      Handle = dlopen(Path->c_str(), RTLD_LAZY);
       if (!Handle) {
         errs() << "Cannot open library: " << dlerror() << '\n';
         exit(1);
@@ -111,7 +111,8 @@ public:
   }
 };
 
-static cl::opt<std::string>
+/// Command line option to specify the dynamic library to load for dynamic advisor
+cl::opt<std::string>
     DLInlineAdvisorPath("dl-inline-advisor-path",
                          cl::desc("Path to a dynamic library that can be used "
                                   "instead of the default inline advisor."),
@@ -267,7 +268,7 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              /* EmitRemarks =*/true, IC);
     }
     // Check if default advisor is enabled and use it if so
-    if (DLInlineAdvisorPath.getNumOccurrences() > 0) {
+    if (DLInlineAdvisorPath != "") {
       Advisor = DLInlineAdvisor.factory(
           M, FAM, M.getContext(), std::move(Advisor), IC);
     }
