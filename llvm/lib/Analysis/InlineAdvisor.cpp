@@ -71,8 +71,7 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 class DLInlineAdvisorInfo {
   typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
       Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
-      std::string &DLCTX);
+      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC);
 
   // dynamic library handler
   void *Handle;
@@ -85,8 +84,7 @@ public:
   DLInlineAdvisorInfo(cl::opt<std::string> *Path)
       : Path(Path), Handle(nullptr), Factory(nullptr) {}
   std::unique_ptr<InlineAdvisor> factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-          std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC,
-          std::string &DLCTX) {
+          std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC) {
     // check if command line has been specified and if so, load the library
     if (!Handle && *Path != "") {
       Handle = dlopen(Path->c_str(), RTLD_LAZY);
@@ -106,7 +104,7 @@ public:
         }
       }
     }
-    return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
+    return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC);
   }
 
   ~DLInlineAdvisorInfo() {
@@ -123,13 +121,6 @@ cl::opt<std::string>
                          cl::value_desc("dynamic library path."));
 
 static DLInlineAdvisorInfo DLInlineAdvisor(&DLInlineAdvisorPath);
-
-/// Command line option to pass extrac context to the dynamic advisor through cli
-static cl::opt<std::string> DLInlineAdvisorCTX(
-    "dl-inline-advisor-ctx", cl::init(""),
-    cl::desc(
-        "String passed to dynamic inline advisor to modify it's behaviour."),
-    cl::value_desc("dynamic library context."));
 
 namespace {
 using namespace llvm::ore;
@@ -281,7 +272,7 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
     // Check if default advisor is enabled and use it if so
     if (DLInlineAdvisorPath != "") {
       Advisor = DLInlineAdvisor.factory(
-          M, FAM, M.getContext(), std::move(Advisor), IC, DLInlineAdvisorCTX);
+          M, FAM, M.getContext(), std::move(Advisor), IC);
     }
     break;
   case InliningAdvisorMode::Development:
