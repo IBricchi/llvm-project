@@ -26,6 +26,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "llvm/Support/DynamicLibrary.h"
 #include <dlfcn.h>
 
 using namespace llvm;
@@ -74,53 +75,42 @@ class DLInlineAdvisorInfo {
       std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC);
 
   // dynamic library handler
-  void *Handle;
+  cl::opt<std::string> &Path;
+  sys::DynamicLibrary DLHandler;
   DLInlineAdivsorFactory_t Factory;
 
-  cl::opt<std::string> *Path;
-
 public:
-  DLInlineAdvisorInfo() : Handle(nullptr), Factory(nullptr) {}
-  DLInlineAdvisorInfo(cl::opt<std::string> *Path)
-      : Path(Path), Handle(nullptr), Factory(nullptr) {}
-  std::unique_ptr<InlineAdvisor> factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
+  DLInlineAdvisorInfo(cl::opt<std::string> &Path) : Path(Path){};
+
+  std::unique_ptr<InlineAdvisor>
+  factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
           std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC) {
-    // check if command line has been specified and if so, load the library
-    if (!Handle && *Path != "") {
-      Handle = dlopen(Path->c_str(), RTLD_LAZY);
-      if (!Handle) {
-        errs() << "Cannot open library: " << dlerror() << '\n';
+    if (!DLHandler.isValid() && Path != "") {
+      DLHandler = sys::DynamicLibrary::getPermanentLibrary(Path.c_str());
+      if (!DLHandler.isValid()) {
+        errs() << "Failed to load dynamic library: " << Path << "\n";
         exit(1);
-      } else {
-        dbgs() << "Library opened successfully\n";
-        Factory =
-            (DLInlineAdivsorFactory_t)dlsym(Handle, "DLInlineAdvisorFactory");
-        if (!Factory) {
-          errs() << "Cannot find function DLInlineAdvisorFactory: " << dlerror()
-                 << "\n";
-          exit(1);
-        } else {
-          dbgs() << "Function DLInlineAdvisorFactory found successfully\n";
-        }
+      }
+      Factory = (DLInlineAdivsorFactory_t)DLHandler.getAddressOfSymbol(
+          "DLInlineAdvisorFactory");
+      if (!Factory) {
+        errs() << "Failed to load DLInlineAdvisorFactory from dynamic library: "
+               << Path << "\n";
+        exit(1);
       }
     }
     return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC);
-  }
-
-  ~DLInlineAdvisorInfo() {
-    if (Handle)
-      dlclose(Handle);
   }
 };
 
 /// Command line option to specify the dynamic library to load for dynamic advisor
 cl::opt<std::string>
     DLInlineAdvisorPath("dl-inline-advisor-path",
-                         cl::desc("Path to a dynamic library that can be used "
-                                  "instead of the default inline advisor."),
-                         cl::value_desc("dynamic library path."));
+                        cl::desc("Path to a dynamic library that can be used "
+                                 "instead of the default inline advisor."),
+                        cl::value_desc("dynamic library path."));
 
-static DLInlineAdvisorInfo DLInlineAdvisor(&DLInlineAdvisorPath);
+DLInlineAdvisorInfo DLInlineAdvisor(DLInlineAdvisorPath);
 
 namespace {
 using namespace llvm::ore;
