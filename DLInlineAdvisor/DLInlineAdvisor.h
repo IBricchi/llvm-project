@@ -15,7 +15,7 @@ class DLInlineAdvisor : public InlineAdvisor {
 public:
   DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
                   std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                  InlineContext IC, std::string& DLCTX);
+                  InlineContext IC);
 
   virtual void onPassEntry(LazyCallGraph::SCC *SCC = nullptr) override;
   virtual void onPassExit(LazyCallGraph::SCC *SCC = nullptr) override;

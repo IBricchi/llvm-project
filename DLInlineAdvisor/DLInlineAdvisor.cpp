@@ -26,13 +26,15 @@
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 
+cl::opt<std::string> DLCTX("dl-inline-ctx", cl::desc("DL context file"), cl::init(""));
+
 extern "C" std::unique_ptr<InlineAdvisor>
 DLInlineAdvisorFactory(Module &M, FunctionAnalysisManager &FAM,
                        LLVMContext &Context,
                        std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                       InlineContext IC, std::string &DLCTX) {
+                       InlineContext IC) {
   return std::make_unique<DLInlineAdvisor>(
-      M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
+      M, FAM, Context, std::move(OriginalAdvisor), IC);
 }
 
 static inline std::string getLocString(DebugLoc loc, bool show_inlining) {
@@ -70,7 +72,7 @@ static inline std::string getFnString(Function *F) {
 DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                                  LLVMContext &Context,
                                  std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                                 InlineContext IC, std::string &DLCTX)
+                                 InlineContext IC)
     : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {
   // this is going to be passed by constructor
   // once I get constructor working properly
