@@ -1,40 +1,5 @@
-#include "llvm/ADT/StringSet.h"
-#include "llvm/Analysis/InlineAdvisor.h"
-
-
-
-namespace llvm {
-class CallBase;
-class Function;
-class LLVMContext;
-class Module;
-
-/// Replay inline advisor that uses optimization remarks from inlining of
-/// previous build to guide current inlining. This is useful for inliner tuning.
-class DLInlineAdvisor : public InlineAdvisor {
-public:
-  DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-                  std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                  InlineContext IC, std::string& DLCTX);
-
-  virtual void onPassEntry(LazyCallGraph::SCC *SCC = nullptr) override;
-  virtual void onPassExit(LazyCallGraph::SCC *SCC = nullptr) override;
-
-  std::unique_ptr<InlineAdvice> getAdviceImpl(CallBase &CB) override;
-
-private:
-  std::unique_ptr<InlineAdvisor> OriginalAdvisor;
-
-  enum struct AdviceModes {
-    DEFAULT,
-    FALSE,
-    TRUE,
-  } adviceMode;
-
-};
-} // namespace llvm
-
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/InlineAdvisor.h"
 #include "llvm/Analysis/InlineCost.h"
@@ -51,69 +16,45 @@ private:
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <memory>
+#define DEBUG_TYPE "inline"
 
+namespace llvm {
 
-#include <fstream>
-#include <iostream>
-#include <sstream>
+class CallBase;
+class Function;
+class LLVMContext;
+class Module;
+
+class DLInlineAdvisor : public InlineAdvisor {
+public:
+  DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
+                  std::unique_ptr<InlineAdvisor> OriginalAdvisor,
+                  InlineContext IC);
+
+  std::unique_ptr<InlineAdvice> getAdviceImpl(CallBase &CB) override;
+
+private:
+  std::unique_ptr<InlineAdvisor> OriginalAdvisor;
+};
+} // namespace llvm
 
 using namespace llvm;
-#define DEBUG_TYPE "inline"
 
 extern "C" std::unique_ptr<InlineAdvisor>
 DLInlineAdvisorFactory(Module &M, FunctionAnalysisManager &FAM,
                        LLVMContext &Context,
                        std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                       InlineContext IC, std::string &DLCTX) {
-    outs() << "ASDFASDFASDF\n";
-    outs().flush();
+                       InlineContext IC) {
   return std::make_unique<DLInlineAdvisor>(
-      M, FAM, Context, std::move(OriginalAdvisor), IC, DLCTX);
+      M, FAM, Context, std::move(OriginalAdvisor), IC);
 }
 
 DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
                                  LLVMContext &Context,
                                  std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                                 InlineContext IC, std::string &DLCTX)
-    : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {
-  // this is going to be passed by constructor
-  // once I get constructor working properly
-  if (DLCTX == "false") {
-    adviceMode = AdviceModes::FALSE;
-  } else if (DLCTX == "true") {
-    adviceMode = AdviceModes::TRUE;
-  } else {
-    adviceMode = AdviceModes::DEFAULT;
-  }
-
-}
-
-void DLInlineAdvisor::onPassEntry(LazyCallGraph::SCC *SCC) {
-  std::cout << "Entered Pass on Dynamic Advisor" << std::endl;
-}
-
-void DLInlineAdvisor::onPassExit(LazyCallGraph::SCC *SCC) {
-  std::cout << "Exited Pass on Dynamic Advisor" << std::endl;
-}
+                                 InlineContext IC)
+    : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {}
 
 std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
-  auto advice = OriginalAdvisor->getAdvice(CB);
-
-  switch (adviceMode) {
-  case AdviceModes::FALSE:
-    advice->recordUnattemptedInlining();
-    advice =
-        std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), false);
-    break;
-  case AdviceModes::TRUE:
-    advice->recordUnattemptedInlining();
-    advice =
-        std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), true);
-    break;
-  case AdviceModes::DEFAULT:
-    break;
-  }
-
-  return advice;
+  return OriginalAdvisor->getAdvice(CB);
 }
