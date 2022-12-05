@@ -135,6 +135,8 @@ static cl::opt<InliningAdvisorMode> UseInlineAdvisor(
     cl::desc("Enable ML policy for inliner. Currently trained for -Oz only"),
     cl::values(clEnumValN(InliningAdvisorMode::Default, "default",
                           "Heuristics-based inliner version"),
+               clEnumValN(InliningAdvisorMode::Dynamic, "dynamic",
+                          "Dynamically loaded inliner version"),
                clEnumValN(InliningAdvisorMode::Development, "development",
                           "Use development mode (runtime-loadable model)"),
                clEnumValN(InliningAdvisorMode::Release, "release",

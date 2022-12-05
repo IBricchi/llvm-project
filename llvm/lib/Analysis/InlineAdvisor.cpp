@@ -24,10 +24,8 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/raw_ostream.h"
-
 #include "llvm/Support/DynamicLibrary.h"
-#include <dlfcn.h>
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 #define DEBUG_TYPE "inline"
@@ -70,9 +68,9 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 
 /// Class to handle dynamic inliner
 class DLInlineAdvisorInfo {
-  typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
-      Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC);
+  typedef InlineAdvisor *(*DLInlineAdivsorFactory_t)(
+      Module &M, FunctionAnalysisManager &FAM, InlineParams Params,
+      InlineContext IC);
 
   // dynamic library handler
   cl::opt<std::string> &Path;
@@ -82,9 +80,8 @@ class DLInlineAdvisorInfo {
 public:
   DLInlineAdvisorInfo(cl::opt<std::string> &Path) : Path(Path){};
 
-  std::unique_ptr<InlineAdvisor>
-  factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-          std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC) {
+  InlineAdvisor *factory(Module &M, FunctionAnalysisManager &FAM,
+                         InlineParams Params, InlineContext IC) {
     if (!DLHandler.isValid() && Path != "") {
       DLHandler = sys::DynamicLibrary::getPermanentLibrary(Path.c_str());
       if (!DLHandler.isValid()) {
@@ -99,11 +96,12 @@ public:
         exit(1);
       }
     }
-    return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC);
+    return Factory(M, FAM, Params, IC);
   }
 };
 
-/// Command line option to specify the dynamic library to load for dynamic advisor
+/// Command line option to specify the dynamic library to load for dynamic
+/// advisor
 cl::opt<std::string>
     DLInlineAdvisorPath("dl-inline-advisor-path",
                         cl::desc("Path to a dynamic library that can be used "
@@ -259,10 +257,16 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
     }
-    // Check if default advisor is enabled and use it if so
+    break;
+  case InliningAdvisorMode::Dynamic:
     if (DLInlineAdvisorPath != "") {
-      Advisor = DLInlineAdvisor.factory(
-          M, FAM, M.getContext(), std::move(Advisor), IC);
+      Advisor.reset(DLInlineAdvisor.factory(M, FAM, Params, IC));
+    } else {
+      errs() << "Dynamic inlining advisor is enabled but no path to the "
+                "dynamic inlining advisor is provided. Please provide a path "
+                "to the dynamic inlining advisor using the "
+                "-dl-inline-advisor-path option.\n";
+      exit(1);
     }
     break;
   case InliningAdvisorMode::Development:

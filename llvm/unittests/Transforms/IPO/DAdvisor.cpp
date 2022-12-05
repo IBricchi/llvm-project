@@ -25,36 +25,25 @@ class Function;
 class LLVMContext;
 class Module;
 
-class DLInlineAdvisor : public InlineAdvisor {
-public:
-  DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-                  std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                  InlineContext IC);
+// class DLInlineAdvisor : public InlineAdvisor {
+// public:
+//   DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM, InlineParams Params,
+//                   InlineContext IC)
+//       : InlineAdvisor(M, FAM, IC),
+//         OriginalAdvisor{} {}
 
-  std::unique_ptr<InlineAdvice> getAdviceImpl(CallBase &CB) override;
+//   std::unique_ptr<InlineAdvice> getAdviceImpl(CallBase &CB) override {
+//     return OriginalAdvisor->getAdvice(CB);
+//   }
 
-private:
-  std::unique_ptr<InlineAdvisor> OriginalAdvisor;
-};
+// private:
+//   std::unique_ptr<InlineAdvisor> OriginalAdvisor;
+// };
 } // namespace llvm
 
 using namespace llvm;
-
-extern "C" std::unique_ptr<InlineAdvisor>
+extern "C" InlineAdvisor*
 DLInlineAdvisorFactory(Module &M, FunctionAnalysisManager &FAM,
-                       LLVMContext &Context,
-                       std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                       InlineContext IC) {
-  return std::make_unique<DLInlineAdvisor>(
-      M, FAM, Context, std::move(OriginalAdvisor), IC);
-}
-
-DLInlineAdvisor::DLInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
-                                 LLVMContext &Context,
-                                 std::unique_ptr<InlineAdvisor> OriginalAdvisor,
-                                 InlineContext IC)
-    : InlineAdvisor(M, FAM, IC), OriginalAdvisor(std::move(OriginalAdvisor)) {}
-
-std::unique_ptr<InlineAdvice> DLInlineAdvisor::getAdviceImpl(CallBase &CB) {
-  return OriginalAdvisor->getAdvice(CB);
+                       InlineParams Params, InlineContext IC) {
+  return new DefaultInlineAdvisor(M, FAM, Params, IC);
 }
