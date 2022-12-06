@@ -71,8 +71,7 @@ extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 /// Class to handle dynamic inliner
 class DLInlineAdvisorInfo {
   typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
-      Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-      std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC);
+      Module &, FunctionAnalysisManager &, InlineParams, InlineContext);
 
   // dynamic library handler
   cl::opt<std::string> &Path;
@@ -82,13 +81,15 @@ class DLInlineAdvisorInfo {
 public:
   DLInlineAdvisorInfo(cl::opt<std::string> &Path) : Path(Path){};
 
-  std::unique_ptr<InlineAdvisor>
-  factory(Module &M, FunctionAnalysisManager &FAM, LLVMContext &Context,
-          std::unique_ptr<InlineAdvisor> OriginalAdvisor, InlineContext IC) {
+  std::unique_ptr<InlineAdvisor> factory(Module &M,
+                                         FunctionAnalysisManager &FAM,
+                                         InlineParams Params,
+                                         InlineContext IC) {
     if (!DLHandler.isValid() && Path != "") {
-      DLHandler = sys::DynamicLibrary::getPermanentLibrary(Path.c_str());
+      std::string error_msg{};
+      DLHandler = sys::DynamicLibrary::getPermanentLibrary(Path.c_str(), &error_msg);
       if (!DLHandler.isValid()) {
-        errs() << "Failed to load dynamic library: " << Path << "\n";
+        errs() << "Failed to load dynamic library: " << Path << ":" << error_msg << "\n";
         exit(1);
       }
       Factory = (DLInlineAdivsorFactory_t)DLHandler.getAddressOfSymbol(
@@ -99,11 +100,12 @@ public:
         exit(1);
       }
     }
-    return Factory(M, FAM, Context, std::move(OriginalAdvisor), IC);
+    return Factory(M, FAM, Params, IC);
   }
 };
 
-/// Command line option to specify the dynamic library to load for dynamic advisor
+/// Command line option to specify the dynamic library to load for dynamic
+/// advisor
 cl::opt<std::string>
     DLInlineAdvisorPath("dl-inline-advisor-path",
                         cl::desc("Path to a dynamic library that can be used "
@@ -261,8 +263,8 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
     }
     // Check if default advisor is enabled and use it if so
     if (DLInlineAdvisorPath != "") {
-      Advisor = DLInlineAdvisor.factory(
-          M, FAM, M.getContext(), std::move(Advisor), IC);
+      outs() << "ID [" << __FILE__ << "]: "<< OptimizationRemarkEmitterAnalysis::ID() << "\n";
+      Advisor = DLInlineAdvisor.factory(M, FAM, Params, IC);
     }
     break;
   case InliningAdvisorMode::Development:
