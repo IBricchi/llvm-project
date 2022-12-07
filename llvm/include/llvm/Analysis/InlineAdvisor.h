@@ -239,6 +239,29 @@ private:
   InlineParams Params;
 };
 
+class DynamicInlineAdvisorAnalysis
+    : AnalysisInfoMixin<DynamicInlineAdvisorAnalysis> {
+public:
+  static AnalysisKey Key;
+
+  typedef InlineAdvisor *(*AdvisorFactory)(Module &M,
+                                           FunctionAnalysisManager &FAM,
+                                           InlineParams Params,
+                                           InlineContext IC);
+
+  DynamicAdvisor(AdvisorFactory factory) : factory(factory) {}
+
+  struct Result {
+    AdvisorFactory factory;
+  };
+
+  Result run(Module &M, ModuleAnalysisManager &MAM) { return {factory}; }
+  Result getResult() { return {factory}; }
+
+private:
+  AdvisorFactory factory;
+};
+
 /// The InlineAdvisorAnalysis is a module pass because the InlineAdvisor
 /// needs to capture state right before inlining commences over a module.
 class InlineAdvisorAnalysis : public AnalysisInfoMixin<InlineAdvisorAnalysis> {

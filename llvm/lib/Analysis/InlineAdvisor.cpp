@@ -68,52 +68,6 @@ namespace llvm {
 extern cl::opt<InlinerFunctionImportStatsOpts> InlinerFunctionImportStats;
 }
 
-/// Class to handle dynamic inliner
-class DLInlineAdvisorInfo {
-  typedef std::unique_ptr<InlineAdvisor> (*DLInlineAdivsorFactory_t)(
-      Module &, FunctionAnalysisManager &, InlineParams, InlineContext);
-
-  // dynamic library handler
-  cl::opt<std::string> &Path;
-  sys::DynamicLibrary DLHandler;
-  DLInlineAdivsorFactory_t Factory;
-
-public:
-  DLInlineAdvisorInfo(cl::opt<std::string> &Path) : Path(Path){};
-
-  std::unique_ptr<InlineAdvisor> factory(Module &M,
-                                         FunctionAnalysisManager &FAM,
-                                         InlineParams Params,
-                                         InlineContext IC) {
-    if (!DLHandler.isValid() && Path != "") {
-      std::string error_msg{};
-      DLHandler = sys::DynamicLibrary::getPermanentLibrary(Path.c_str(), &error_msg);
-      if (!DLHandler.isValid()) {
-        errs() << "Failed to load dynamic library: " << Path << ":" << error_msg << "\n";
-        exit(1);
-      }
-      Factory = (DLInlineAdivsorFactory_t)DLHandler.getAddressOfSymbol(
-          "DLInlineAdvisorFactory");
-      if (!Factory) {
-        errs() << "Failed to load DLInlineAdvisorFactory from dynamic library: "
-               << Path << "\n";
-        exit(1);
-      }
-    }
-    return Factory(M, FAM, Params, IC);
-  }
-};
-
-/// Command line option to specify the dynamic library to load for dynamic
-/// advisor
-cl::opt<std::string>
-    DLInlineAdvisorPath("dl-inline-advisor-path",
-                        cl::desc("Path to a dynamic library that can be used "
-                                 "instead of the default inline advisor."),
-                        cl::value_desc("dynamic library path."));
-
-DLInlineAdvisorInfo DLInlineAdvisor(DLInlineAdvisorPath);
-
 namespace {
 using namespace llvm::ore;
 class MandatoryInlineAdvice : public InlineAdvice {
@@ -246,6 +200,8 @@ void InlineAdvice::recordInliningWithCalleeDeleted() {
 
 AnalysisKey InlineAdvisorAnalysis::Key;
 
+AnalysisKey DynamicAdvisor::Key;
+
 bool InlineAdvisorAnalysis::Result::tryCreate(
     InlineParams Params, InliningAdvisorMode Mode,
     const ReplayInlinerSettings &ReplaySettings, InlineContext IC) {
@@ -261,10 +217,12 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
     }
-    // Check if default advisor is enabled and use it if so
-    if (DLInlineAdvisorPath != "") {
-      outs() << "ID [" << __FILE__ << "]: "<< OptimizationRemarkEmitterAnalysis::ID() << "\n";
-      Advisor = DLInlineAdvisor.factory(M, FAM, Params, IC);
+    {
+      // TODO! check if MAM has DynamicInlineAdvisorAnalysis registered
+      auto &DA = MAM.getResult<DynamicInlineAdvisorAnalysis>(M);
+      if (DA.factory) {
+        Advisor.reset(DA.factory(M, FAM, Params, IC));
+      }
     }
     break;
   case InliningAdvisorMode::Development:
