@@ -59,7 +59,7 @@ struct CompilerInstance {
   std::string output;
 
   auto run_default(StringRef IR) {
-    DynamicInlineAdvisorAnalysis::HasBeenRegistered = false;
+    PluginInlineAdvisorAnalysis::HasBeenRegistered = false;
     std::unique_ptr<Module> M = parseAssemblyString(IR, Error, Ctx);
     MPM.run(*M, MAM);
     ASSERT_TRUE(M);
@@ -70,7 +70,6 @@ struct CompilerInstance {
   }
 
   auto run_dynamic(StringRef IR) {
-    DynamicInlineAdvisorAnalysis::HasBeenRegistered = true;
     std::unique_ptr<Module> M = parseAssemblyString(IR, Error, Ctx);
     MPM.run(*M, MAM);
     ASSERT_TRUE(M);
@@ -96,7 +95,7 @@ define void @f3() {
   ret void
 }
   )",
-    // Test that has 5 functionsof which 2 are recursive
+    // Test that has 5 functions of which 2 are recursive
     R"(
 define void @f1() {
   call void @f3()
