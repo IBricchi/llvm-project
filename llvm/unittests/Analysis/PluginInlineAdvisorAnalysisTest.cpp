@@ -14,7 +14,8 @@ void anchor() {}
 
 static std::string libPath(const std::string Name = "InlineAdvisorPlugin") {
   const auto &Argvs = testing::internal::GetArgvs();
-  const char *Argv0 = Argvs.size() > 0 ? Argvs[0].c_str() : "PluginInlineAdvisorAnalysisTest";
+  const char *Argv0 =
+      Argvs.size() > 0 ? Argvs[0].c_str() : "PluginInlineAdvisorAnalysisTest";
   void *Ptr = (void *)(intptr_t)anchor;
   std::string Path = sys::fs::getMainExecutable(Argv0, Ptr);
   llvm::SmallString<256> Buf{sys::path::parent_path(Path)};
@@ -258,6 +259,10 @@ define i32 @fib_check(){
 // check that loading a plugin works
 // the plugin being loaded acts identically to the default inliner
 TEST(PluginInlineAdvisorTest, PluginLoad) {
+#if !defined(LLVM_ENABLE_PLUGINS)
+  // Disable the test if plugins are disabled.
+  return;
+#endif
   CompilerInstance CI{};
   CI.setupPlugin();
 
