@@ -26,6 +26,9 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "llvm/Support/DynamicLibrary.h"
+#include <dlfcn.h>
+
 using namespace llvm;
 #define DEBUG_TYPE "inline"
 #ifdef LLVM_HAVE_TF_AOT_INLINERSIZEMODEL
@@ -196,11 +199,20 @@ void InlineAdvice::recordInliningWithCalleeDeleted() {
 }
 
 AnalysisKey InlineAdvisorAnalysis::Key;
+AnalysisKey DynamicInlineAdvisorAnalysis::Key;
+bool DynamicInlineAdvisorAnalysis::HasBeenRegistered = false;
 
 bool InlineAdvisorAnalysis::Result::tryCreate(
     InlineParams Params, InliningAdvisorMode Mode,
     const ReplayInlinerSettings &ReplaySettings, InlineContext IC) {
   auto &FAM = MAM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
+
+  if (DynamicInlineAdvisorAnalysis::HasBeenRegistered) {
+    auto &DA = MAM.getResult<DynamicInlineAdvisorAnalysis>(M);
+    Advisor.reset(DA.Factory(M, FAM, Params, IC));
+    return !!Advisor;
+  }
+
   switch (Mode) {
   case InliningAdvisorMode::Default:
     LLVM_DEBUG(dbgs() << "Using default inliner heuristic.\n");
@@ -212,6 +224,7 @@ bool InlineAdvisorAnalysis::Result::tryCreate(
                                              std::move(Advisor), ReplaySettings,
                                              /* EmitRemarks =*/true, IC);
     }
+
     break;
   case InliningAdvisorMode::Development:
 #ifdef LLVM_HAVE_TF_API

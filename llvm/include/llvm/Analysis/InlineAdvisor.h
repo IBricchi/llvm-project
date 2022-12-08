@@ -193,7 +193,8 @@ public:
     OS << "Unimplemented InlineAdvisor print\n";
   }
 
-  /// NOTE pass name is annotated only when inline advisor constructor provides InlineContext.
+  /// NOTE pass name is annotated only when inline advisor constructor provides
+  /// InlineContext.
   const char *getAnnotatedInlinePassName() const {
     return AnnotatedInlinePassName.c_str();
   }
@@ -236,6 +237,34 @@ private:
   std::unique_ptr<InlineAdvice> getAdviceImpl(CallBase &CB) override;
 
   InlineParams Params;
+};
+
+class DynamicInlineAdvisorAnalysis
+    : public AnalysisInfoMixin<DynamicInlineAdvisorAnalysis> {
+public:
+  static AnalysisKey Key;
+  static bool HasBeenRegistered;
+
+  typedef InlineAdvisor *(*AdvisorFactory)(Module &M,
+                                           FunctionAnalysisManager &FAM,
+                                           InlineParams Params,
+                                           InlineContext IC);
+
+  DynamicInlineAdvisorAnalysis(AdvisorFactory Factory) : Factory(Factory) {
+    HasBeenRegistered = true;
+    assert(Factory != nullptr &&
+           "The dynamic advisor factory should not be a null pointer.");
+  }
+
+  struct Result {
+    AdvisorFactory Factory;
+  };
+
+  Result run(Module &M, ModuleAnalysisManager &MAM) { return {Factory}; }
+  Result getResult() { return {Factory}; }
+
+private:
+  AdvisorFactory Factory;
 };
 
 /// The InlineAdvisorAnalysis is a module pass because the InlineAdvisor
