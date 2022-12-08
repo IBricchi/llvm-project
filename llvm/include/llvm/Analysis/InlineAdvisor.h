@@ -240,26 +240,31 @@ private:
 };
 
 class DynamicInlineAdvisorAnalysis
-    : AnalysisInfoMixin<DynamicInlineAdvisorAnalysis> {
+    : public AnalysisInfoMixin<DynamicInlineAdvisorAnalysis> {
 public:
   static AnalysisKey Key;
+  static bool HasBeenRegistered;
 
   typedef InlineAdvisor *(*AdvisorFactory)(Module &M,
                                            FunctionAnalysisManager &FAM,
                                            InlineParams Params,
                                            InlineContext IC);
 
-  DynamicAdvisor(AdvisorFactory factory) : factory(factory) {}
+  DynamicInlineAdvisorAnalysis(AdvisorFactory Factory) : Factory(Factory) {
+    HasBeenRegistered = true;
+    assert(Factory != nullptr &&
+           "The dynamic advisor factory should not be a null pointer.");
+  }
 
   struct Result {
-    AdvisorFactory factory;
+    AdvisorFactory Factory;
   };
 
-  Result run(Module &M, ModuleAnalysisManager &MAM) { return {factory}; }
-  Result getResult() { return {factory}; }
+  Result run(Module &M, ModuleAnalysisManager &MAM) { return {Factory}; }
+  Result getResult() { return {Factory}; }
 
 private:
-  AdvisorFactory factory;
+  AdvisorFactory Factory;
 };
 
 /// The InlineAdvisorAnalysis is a module pass because the InlineAdvisor

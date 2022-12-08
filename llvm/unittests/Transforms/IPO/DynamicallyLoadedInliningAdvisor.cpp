@@ -1,12 +1,11 @@
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/Config/config.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Testing/Support/Error.h"
 #include "gtest/gtest.h"
-
-extern llvm::cl::opt<std::string> DLInlineAdvisorPath;
 
 namespace llvm {
 
@@ -35,15 +34,24 @@ struct CompilerInstance {
 
   SMDiagnostic Error;
 
+  void setupPlugin() {
+    auto PluginPath = libPath();
+    ASSERT_NE("", PluginPath);
+    Expected<PassPlugin> Plugin = PassPlugin::Load(PluginPath);
+    ASSERT_TRUE(!!Plugin) << "Plugin path: " << PluginPath;
+    Plugin->registerPassBuilderCallbacks(PB);
+    ASSERT_THAT_ERROR(PB.parsePassPipeline(MPM, "dynamic-inline-advisor"),
+                      Succeeded());
+  }
+
   CompilerInstance() {
     IP = getInlineParams(3, 0);
-
     PB.registerModuleAnalyses(MAM);
     PB.registerCGSCCAnalyses(CGAM);
     PB.registerFunctionAnalyses(FAM);
     PB.registerLoopAnalyses(LAM);
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-
+    setupPlugin();
     MPM.addPass(ModuleInlinerPass(IP, InliningAdvisorMode::Default,
                                   ThinOrFullLTOPhase::None));
   }
@@ -51,7 +59,7 @@ struct CompilerInstance {
   std::string output;
 
   auto run_default(StringRef IR) {
-    DLInlineAdvisorPath = "";
+    DynamicInlineAdvisorAnalysis::HasBeenRegistered = false;
     std::unique_ptr<Module> M = parseAssemblyString(IR, Error, Ctx);
     MPM.run(*M, MAM);
     ASSERT_TRUE(M);
@@ -62,7 +70,7 @@ struct CompilerInstance {
   }
 
   auto run_dynamic(StringRef IR) {
-    DLInlineAdvisorPath = libPath();
+    DynamicInlineAdvisorAnalysis::HasBeenRegistered = true;
     std::unique_ptr<Module> M = parseAssemblyString(IR, Error, Ctx);
     MPM.run(*M, MAM);
     ASSERT_TRUE(M);
