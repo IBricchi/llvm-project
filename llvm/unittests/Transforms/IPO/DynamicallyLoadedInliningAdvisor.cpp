@@ -22,6 +22,8 @@ static std::string libPath(const std::string Name = "DAdvisor") {
   return std::string(Buf.str());
 }
 
+// Example of a custom InlineAdvisor that only inlines calls to functions called
+// "foo".
 class FooOnlyInlineAdvisor : public InlineAdvisor {
 public:
   FooOnlyInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
@@ -38,8 +40,7 @@ public:
 static InlineAdvisor *fooOnlyFactory(Module &M, FunctionAnalysisManager &FAM,
                                      InlineParams Params, InlineContext IC) {
   return new FooOnlyInlineAdvisor(M, FAM, Params, IC);
-
-} // namespace llvm
+}
 
 struct CompilerInstance {
   LLVMContext Ctx;
@@ -54,6 +55,7 @@ struct CompilerInstance {
 
   SMDiagnostic Error;
 
+  // connect the plugin to our compiler instance
   void setupPlugin() {
     auto PluginPath = libPath();
     ASSERT_NE("", PluginPath);
@@ -64,9 +66,10 @@ struct CompilerInstance {
                       Succeeded());
   }
 
+  // connect the FooOnlyInlineAdvisor to our compiler instance
   void setupFooOnly() {
     MAM.registerPass(
-        [&] { return DynamicInlineAdvisorAnalysis(fooOnlyFactory); });
+        [&] { return PluginInlineAdvisorAnalysis(fooOnlyFactory); });
   }
 
   CompilerInstance() {
@@ -83,6 +86,7 @@ struct CompilerInstance {
   std::string output;
   std::unique_ptr<Module> outputM;
 
+  // run with the default inliner
   auto run_default(StringRef IR) {
     PluginInlineAdvisorAnalysis::HasBeenRegistered = false;
     outputM = parseAssemblyString(IR, Error, Ctx);
@@ -94,7 +98,11 @@ struct CompilerInstance {
     ASSERT_TRUE(true);
   }
 
+  // run with the dnamic inliner
   auto run_dynamic(StringRef IR) {
+    // note typically the constructor for the DynamicInlineAdvisorAnalysis
+    // will automatically set this to true, we controll it here only to
+    // altenate between the default and dynamic inliner in our test
     PluginInlineAdvisorAnalysis::HasBeenRegistered = true;
     outputM = parseAssemblyString(IR, Error, Ctx);
     MPM.run(*outputM, MAM);
@@ -247,36 +255,36 @@ define i32 @fib_check(){
 }
   )"};
 
-TEST(DynamicInliningAdvisorTest, Foo) {
-  // check that using the default inliner normally or through a plugin
-  // results in the same output
-  {
-    CompilerInstance CI{};
-    CI.setupPlugin();
+// check that loading a plugin works
+// the plugin being loaded acts identically to the default inliner
+TEST(PluginInlineAdvisorTest, PluginLoad) {
+  CompilerInstance CI{};
+  CI.setupPlugin();
 
-    for (StringRef IR : TestIRS) {
-      CI.run_default(IR);
-      std::string default_output = CI.output;
-      CI.run_dynamic(IR);
-      std::string dynamic_output = CI.output;
-      ASSERT_EQ(default_output, dynamic_output);
-    }
+  for (StringRef IR : TestIRS) {
+    CI.run_default(IR);
+    std::string default_output = CI.output;
+    CI.run_dynamic(IR);
+    std::string dynamic_output = CI.output;
+    ASSERT_EQ(default_output, dynamic_output);
   }
+}
 
-  // check that callgraph includes no calls to function with name foo
-  // when using the foo only inlining policy
-  {
-    CompilerInstance CI{};
-    CI.setupFooOnly();
+// check that the behaviour of a custom inliner is correct
+// the custom inliner inlines all functions that are not named "foo"
+// this testdoes not require plugins to be enabled
+TEST(PluginInlineAdvisorTest, CustomAdvisor) {
+  CompilerInstance CI{};
+  CI.setupFooOnly();
 
-    for (StringRef IR : TestIRS) {
-      CI.run_dynamic(IR);
-      CallGraph CGraph = CallGraph(*CI.outputM);
-      for (auto &node : CGraph) {
-        for (auto &edge : *node.second) {
-          if (!edge.first) continue;
-          ASSERT_NE(edge.second->getFunction()->getName(), "foo");
-        }
+  for (StringRef IR : TestIRS) {
+    CI.run_dynamic(IR);
+    CallGraph CGraph = CallGraph(*CI.outputM);
+    for (auto &node : CGraph) {
+      for (auto &edge : *node.second) {
+        if (!edge.first)
+          continue;
+        ASSERT_NE(edge.second->getFunction()->getName(), "foo");
       }
     }
   }
