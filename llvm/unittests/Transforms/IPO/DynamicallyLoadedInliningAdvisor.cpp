@@ -1,3 +1,4 @@
+#include "llvm/Analysis/CallGraph.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/Config/config.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -20,6 +21,25 @@ static std::string libPath(const std::string Name = "DAdvisor") {
   sys::path::append(Buf, (Name + LLVM_PLUGIN_EXT).c_str());
   return std::string(Buf.str());
 }
+
+class FooOnlyInlineAdvisor : public InlineAdvisor {
+public:
+  FooOnlyInlineAdvisor(Module &M, FunctionAnalysisManager &FAM,
+                       InlineParams Params, InlineContext IC)
+      : InlineAdvisor(M, FAM, IC) {}
+
+  std::unique_ptr<InlineAdvice> getAdviceImpl(CallBase &CB) override {
+    if (CB.getCalledFunction()->getName() == "foo")
+      return std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), true);
+    return std::make_unique<InlineAdvice>(this, CB, getCallerORE(CB), false);
+  }
+};
+
+static InlineAdvisor *fooOnlyFactory(Module &M, FunctionAnalysisManager &FAM,
+                                     InlineParams Params, InlineContext IC) {
+  return new FooOnlyInlineAdvisor(M, FAM, Params, IC);
+
+} // namespace llvm
 
 struct CompilerInstance {
   LLVMContext Ctx;
@@ -44,6 +64,11 @@ struct CompilerInstance {
                       Succeeded());
   }
 
+  void setupFooOnly() {
+    MAM.registerPass(
+        [&] { return DynamicInlineAdvisorAnalysis(fooOnlyFactory); });
+  }
+
   CompilerInstance() {
     IP = getInlineParams(3, 0);
     PB.registerModuleAnalyses(MAM);
@@ -51,32 +76,32 @@ struct CompilerInstance {
     PB.registerFunctionAnalyses(FAM);
     PB.registerLoopAnalyses(LAM);
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-    setupPlugin();
     MPM.addPass(ModuleInlinerPass(IP, InliningAdvisorMode::Default,
                                   ThinOrFullLTOPhase::None));
   }
 
   std::string output;
+  std::unique_ptr<Module> outputM;
 
   auto run_default(StringRef IR) {
     PluginInlineAdvisorAnalysis::HasBeenRegistered = false;
-    std::unique_ptr<Module> M = parseAssemblyString(IR, Error, Ctx);
-    MPM.run(*M, MAM);
-    ASSERT_TRUE(M);
+    outputM = parseAssemblyString(IR, Error, Ctx);
+    MPM.run(*outputM, MAM);
+    ASSERT_TRUE(outputM);
     output.clear();
     raw_string_ostream o_stream{output};
-    M->print(o_stream, nullptr);
+    outputM->print(o_stream, nullptr);
     ASSERT_TRUE(true);
   }
 
   auto run_dynamic(StringRef IR) {
     PluginInlineAdvisorAnalysis::HasBeenRegistered = true;
-    std::unique_ptr<Module> M = parseAssemblyString(IR, Error, Ctx);
-    MPM.run(*M, MAM);
-    ASSERT_TRUE(M);
+    outputM = parseAssemblyString(IR, Error, Ctx);
+    MPM.run(*outputM, MAM);
+    ASSERT_TRUE(outputM);
     output.clear();
     raw_string_ostream o_stream{output};
-    M->print(o_stream, nullptr);
+    outputM->print(o_stream, nullptr);
     ASSERT_TRUE(true);
   }
 };
@@ -85,10 +110,10 @@ StringRef TestIRS[] = {
     // Simple 3 function inline case
     R"(
 define void @f1() {
-  call void @f2()
+  call void @foo()
   ret void
 }
-define void @f2() {
+define void @foo() {
   call void @f3()
   ret void
 }
@@ -99,14 +124,14 @@ define void @f3() {
     // Test that has 5 functions of which 2 are recursive
     R"(
 define void @f1() {
-  call void @f3()
+  call void @foo()
   ret void
 }
 define void @f2() {
-  call void @f3()
+  call void @foo()
   ret void
 }
-define void @f3() {
+define void @foo() {
   call void @f4()
   call void @f5()
   ret void
@@ -115,7 +140,7 @@ define void @f4() {
   ret void
 }
 define void @f5() {
-  call void @f3()
+  call void @foo()
   ret void
 }
   )",
@@ -223,14 +248,37 @@ define i32 @fib_check(){
   )"};
 
 TEST(DynamicInliningAdvisorTest, Foo) {
-  CompilerInstance CI{};
+  // check that using the default inliner normally or through a plugin
+  // results in the same output
+  {
+    CompilerInstance CI{};
+    CI.setupPlugin();
 
-  for (StringRef IR : TestIRS) {
-    CI.run_default(IR);
-    std::string default_output = CI.output;
-    CI.run_dynamic(IR);
-    std::string dynamic_output = CI.output;
-    ASSERT_EQ(default_output, dynamic_output);
+    for (StringRef IR : TestIRS) {
+      CI.run_default(IR);
+      std::string default_output = CI.output;
+      CI.run_dynamic(IR);
+      std::string dynamic_output = CI.output;
+      ASSERT_EQ(default_output, dynamic_output);
+    }
+  }
+
+  // check that callgraph includes no calls to function with name foo
+  // when using the foo only inlining policy
+  {
+    CompilerInstance CI{};
+    CI.setupFooOnly();
+
+    for (StringRef IR : TestIRS) {
+      CI.run_dynamic(IR);
+      CallGraph CGraph = CallGraph(*CI.outputM);
+      for (auto &node : CGraph) {
+        for (auto &edge : *node.second) {
+          if (!edge.first) continue;
+          ASSERT_NE(edge.second->getFunction()->getName(), "foo");
+        }
+      }
+    }
   }
 }
 
