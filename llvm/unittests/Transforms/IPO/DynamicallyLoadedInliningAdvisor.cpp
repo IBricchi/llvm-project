@@ -70,6 +70,7 @@ struct CompilerInstance {
   }
 
   auto run_dynamic(StringRef IR) {
+    PluginInlineAdvisorAnalysis::HasBeenRegistered = true;
     std::unique_ptr<Module> M = parseAssemblyString(IR, Error, Ctx);
     MPM.run(*M, MAM);
     ASSERT_TRUE(M);

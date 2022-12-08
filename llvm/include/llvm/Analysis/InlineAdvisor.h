@@ -292,8 +292,6 @@ public:
                                            InlineContext IC);
 
   PluginInlineAdvisorAnalysis(AdvisorFactory Factory) : Factory(Factory) {
-    assert(HasBeenRegistered == false &&
-           "Multiple plugin advisors have been registered.");
     HasBeenRegistered = true;
     assert(Factory != nullptr &&
            "The plugin advisor factory should not be a null pointer.");
