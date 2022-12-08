@@ -12,9 +12,9 @@ namespace llvm {
 
 void anchor() {}
 
-static std::string libPath(const std::string Name = "DAdvisor") {
+static std::string libPath(const std::string Name = "InlineAdvisorPlugin") {
   const auto &Argvs = testing::internal::GetArgvs();
-  const char *Argv0 = Argvs.size() > 0 ? Argvs[0].c_str() : "PluginsTests";
+  const char *Argv0 = Argvs.size() > 0 ? Argvs[0].c_str() : "PluginInlineAdvisorAnalysisTest";
   void *Ptr = (void *)(intptr_t)anchor;
   std::string Path = sys::fs::getMainExecutable(Argv0, Ptr);
   llvm::SmallString<256> Buf{sys::path::parent_path(Path)};
