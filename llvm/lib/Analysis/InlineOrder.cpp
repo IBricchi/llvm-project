@@ -22,7 +22,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "inline-order"
 
-enum class InlinePriorityMode : int { Size, Cost, CostBenefit, ML };
+enum class InlinePriorityMode : int { Size, Cost, CostBenefit, ML, TopDown };
 
 static cl::opt<InlinePriorityMode> UseInlinePriority(
     "inline-priority-mode", cl::init(InlinePriorityMode::Size), cl::Hidden,
@@ -33,8 +33,9 @@ static cl::opt<InlinePriorityMode> UseInlinePriority(
                           "Use inline cost priority."),
                clEnumValN(InlinePriorityMode::CostBenefit, "cost-benefit",
                           "Use cost-benefit ratio."),
-               clEnumValN(InlinePriorityMode::ML, "ml",
-                          "Use ML.")));
+               clEnumValN(InlinePriorityMode::ML, "ml", "Use ML."),
+               clEnumValN(InlinePriorityMode::TopDown, "top-down",
+                          "Use callgraph top-down priority.")));
 
 static cl::opt<int> ModuleInlinerTopPriorityThreshold(
     "moudle-inliner-top-priority-threshold", cl::Hidden, cl::init(0),
@@ -279,6 +280,101 @@ private:
   const InlineParams &Params;
 };
 
+/// Top Down Inline Order
+/// The order in which inlining decisions are made impacts the explorable
+/// decision space for the inliner.
+/// For example with:
+/// A   B
+///  \ /
+///   C
+///   |
+///   D
+/// In this case, if we were to first make a decision on the C->D call site
+/// We would lose the ability to make separate decisions for the A->C->D and
+/// B->C->D call paths. And a final inlining graph like:
+/// ACD  B
+///      |
+///      C
+///      |
+///      D
+/// Could not be generated since we have two different inlining decisions for CD
+/// With the top-down inliner, we can explore all possible inlining decisions.
+class TopDownInlineOrder : public InlineOrder<std::pair<CallBase *, int>> {
+  using T = std::pair<CallBase *, int>;
+
+  // We keep track of how many times a function has been called. This is used
+  // to order call sites in a top-down fashion by selecting the call site with
+  // the least number of calls to its caller at each step.
+
+  // check which call sites caller has least calls
+  bool hasLowerPriority(const CallBase *L, const CallBase *R) const {
+    int left_count = 0;
+    const auto left_I = NodeCallCount.find(L->getCaller());
+    if (left_I != NodeCallCount.end())
+      left_count = left_I->second;
+
+    int right_count = 0;
+    const auto right_I = NodeCallCount.find(R->getCaller());
+    if (right_I != NodeCallCount.end())
+      right_count = right_I->second;
+
+    return left_count > right_count;
+  }
+
+public:
+  TopDownInlineOrder() : NodeCallCount{} {
+    isLess = [&](const CallBase *L, const CallBase *R) {
+      return hasLowerPriority(L, R);
+    };
+  }
+
+  size_t size() override { return Heap.size(); }
+
+  void push(const T &Elt) override {
+    CallBase *CB = Elt.first;
+    const int InlineHistoryID = Elt.second;
+
+    // We keep track of how many times a function is called by other functions
+    // This count can be used to determine the top of the call graph by ordering
+    // the heap form least calls to most calls
+    Function *Callee = CB->getCalledFunction();
+    if (NodeCallCount.find(Callee) == NodeCallCount.end()) {
+      NodeCallCount[Callee] = 0;
+    }
+    NodeCallCount[Callee]++;
+
+    Heap.push_back(CB);
+    std::push_heap(Heap.begin(), Heap.end(), isLess);
+
+    InlineHistoryMap[CB] = InlineHistoryID;
+  }
+
+  T pop() override {
+    assert(size() > 0);
+
+    CallBase *CB = Heap.front();
+    T Result = std::make_pair(CB, InlineHistoryMap[CB]);
+    InlineHistoryMap.erase(CB);
+    std::pop_heap(Heap.begin(), Heap.end(), isLess);
+    Heap.pop_back();
+    return Result;
+  }
+
+  void erase_if(function_ref<bool(T)> Pred) override {
+    auto PredWrapper = [=](CallBase *CB) -> bool {
+      return Pred(std::make_pair(CB, 0));
+    };
+    llvm::erase_if(Heap, PredWrapper);
+    std::make_heap(Heap.begin(), Heap.end(), isLess);
+  }
+
+private:
+  SmallVector<CallBase *, 16> Heap;
+  std::function<bool(const CallBase *L, const CallBase *R)> isLess;
+  DenseMap<CallBase *, int> InlineHistoryMap;
+  DenseMap<const Function *, int> NodeCallCount;
+};
+
 } // namespace
 
 std::unique_ptr<InlineOrder<std::pair<CallBase *, int>>>
@@ -295,11 +391,14 @@ llvm::getInlineOrder(FunctionAnalysisManager &FAM, const InlineParams &Params) {
   case InlinePriorityMode::CostBenefit:
     LLVM_DEBUG(
         dbgs() << "    Current used priority: cost-benefit priority ---- \n");
-    return std::make_unique<PriorityInlineOrder<CostBenefitPriority>>(FAM, Params);
   case InlinePriorityMode::ML:
     LLVM_DEBUG(
         dbgs() << "    Current used priority: ML priority ---- \n");
     return std::make_unique<PriorityInlineOrder<MLPriority>>(FAM, Params);
+  case InlinePriorityMode::TopDown:
+    LLVM_DEBUG(
+        dbgs() << "    Current used priority: top-down priority ---- \n");
+    return std::make_unique<TopDownInlineOrder>();
   }
   return nullptr;
 }
