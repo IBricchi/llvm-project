@@ -203,56 +203,6 @@ private:
   int Cost = INT_MAX;
 };
 
-class TopDownPriority {
-public:
-  TopDownPriority() = default;
-  TopDownPriority(
-      const CallBase *CB, FunctionAnalysisManager &FAM,
-      const InlineParams &Params,
-      const std::unordered_map<std::string, std::vector<std::string>>
-          &RevCallGraph) {
-
-    Depth = 0;
-
-    std::queue<std::pair<std::string, int>> Working;
-    std::set<std::string> Visited;
-    std::vector<int> Depths;
-
-    Working.push(std::make_pair(CB->getCaller()->getName().str(), 1));
-
-    while (!Working.empty()) {
-      auto cur = Working.front();
-      Working.pop();
-      if (Visited.find(cur.first) != Visited.end()) {
-        continue;
-      }
-      Visited.insert(cur.first);
-      if (RevCallGraph.find(cur.first) != RevCallGraph.end()) {
-        for (auto &caller : RevCallGraph.at(cur.first)) {
-          Working.push(std::make_pair(caller, cur.second + 1));
-        }
-      } else {
-        Depths.push_back(cur.second);
-      }
-    }
-
-    Depth = std::numeric_limits<int>::max();
-    for (int depth : Depths) {
-      if (depth < Depth) {
-        Depth = depth;
-      }
-    }
-  }
-
-  static bool isMoreDesirable(const TopDownPriority &P1,
-                              const TopDownPriority &P2) {
-    return P1.Depth < P2.Depth;
-  }
-
-private:
-  int Depth;
-};
-
 template <typename PriorityT>
 class PriorityInlineOrder : public InlineOrder<std::pair<CallBase *, int>> {
   using T = std::pair<CallBase *, int>;
@@ -335,17 +285,14 @@ private:
   const InlineParams &Params;
 };
 
-/////////////////////////////////////////////////////
-/////////////////////////////////////////////////////
-/////                                           /////
-/////  InlineCost - Cost Analysis for Inlining  /////
-/////                                           /////
-/////////////////////////////////////////////////////
-/////////////////////////////////////////////////////
-
 class TopDownInlineOrder : public InlineOrder<std::pair<CallBase *, int>> {
   using T = std::pair<CallBase *, int>;
 
+  // We keep track of how many times a function has been called. This is used
+  // to order call sites in a top-down fashion by selecting the call site with
+  // the least number of calls to its caller at each step.
+
+  // check which call sites caller has least calls
   bool hasLowerPriority(const CallBase *L, const CallBase *R) const {
     int left_count = 0;
     const auto left_I = NodeCallCount.find(L->getCaller());
