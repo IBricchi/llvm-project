@@ -381,9 +381,14 @@ private:
   bool CheckIsValidForwardReference(const semantics::DerivedTypeSpec &);
   MaybeExpr AnalyzeComplex(MaybeExpr &&re, MaybeExpr &&im, const char *what);
 
+  MaybeExpr IterativelyAnalyzeSubexpressions(const parser::Expr &);
+
   semantics::SemanticsContext &context_;
   FoldingContext &foldingContext_{context_.foldingContext()};
   std::map<parser::CharBlock, int> impliedDos_; // values are INTEGER kinds
+  std::map<parser::CharBlock,
+      std::pair<parser::CharBlock, evaluate::characteristics::Procedure>>
+      implicitInterfaces_;
   bool isWholeAssumedSizeArrayOk_{false};
   bool isNullPointerOk_{false};
   bool useSavedTypedExprs_{true};
@@ -391,6 +396,7 @@ private:
   bool inDataStmtObject_{false};
   bool inDataStmtConstant_{false};
   bool inStmtFunctionDefinition_{false};
+  bool iterativelyAnalyzingSubexpressions_{false};
   friend class ArgumentAnalyzer;
 };
 

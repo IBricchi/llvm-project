@@ -21,11 +21,11 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Host.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -949,15 +949,7 @@ Archive::child_iterator Archive::child_begin(Error &Err,
     return child_iterator::itr(
         Child(this, FirstRegularData, FirstRegularStartOfFile), Err);
 
-  uint64_t FirstChildOffset = getFirstChildOffset();
-  const char *Loc = Data.getBufferStart() + FirstChildOffset;
-  if (Loc >= Data.getBufferEnd()) {
-    Err = malformedError("First member offset " + Twine(FirstChildOffset) +
-                         " is beyond the data buffer which has size of " +
-                         Twine(Data.getBufferSize()));
-    return child_end();
-  }
-
+  const char *Loc = Data.getBufferStart() + getFirstChildOffset();
   Child C(this, Loc, &Err);
   if (Err)
     return child_end();
